@@ -1,0 +1,30 @@
+# Evaluation protocol. Owner: Member 3. Producers READ this file; they never redefine framesets.
+
+framesets:
+  eval10: {start: 0, stop: null, stride: 10}     # null -> end of clip
+  win60s: {start: 0, stop: 1500, stride: 1}
+  full: {start: 0, stop: null, stride: 1}
+  smoke: {start: 0, stop: 100, stride: 1}       # integration smoke tests only; never reported
+  fixture3: {start: 0, stop: 3, stride: 1}       # synthetic test fixtures only
+
+score_floor: 0.05
+
+detection:
+  iou_thresholds: [0.5, 0.3]
+  matching: greedy_by_score       # per frame, highest score first
+  ap_interpolation: all_point
+  ap_iou_range: [0.5, 0.95, 0.05]
+  height_bins_px: [0, 30, 45, 60, 100000]
+
+classification:
+  curve_points: 200
+
+proposal_eval:
+  iou_positive: 0.5
+
+oracle:
+  noisy_gt: {drop_rate: 0.10, jitter_px: 2.0, seed: 42}
+
+tracking:
+  trackeval_metrics: [HOTA, CLEAR, Identity]
+  similarity_threshold: 0.5

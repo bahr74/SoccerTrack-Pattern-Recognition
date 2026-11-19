@@ -1,0 +1,42 @@
+# Project-wide configuration.
+# Owner: Member 4 (integration). The split values are frozen by the approved plan
+# (docs/planning/phase2_phase3_plan.md, Revision 3, Section 2.1). Changing them needs approval from all members.
+# Machine-specific paths do NOT belong here; see configs/data_sources.yaml (git-ignored).
+
+dataset:
+  name: soccertrack-v2
+  release: v1.2
+  hf_repo: atomscott/soccertrack-v2
+  revision: 325bd4c57ee8e135ab652f3921d274526ada496b
+  expected_boxes_per_frame: 22
+  fps: 25.0
+
+split:
+  train: ["118575", "118576", "118577", "118578", "128058"]
+  train_optional: ["117092"]      # different camera geometry; enable only after team approval
+  use_train_optional: false
+  val: ["117093"]
+  val_optional: ["132877"]        # requires an extra download (~0.31 GB); enable only after approval
+  use_val_optional: false
+  test: ["128057", "132831"]      # held out; frozen-test runs only (docs/team/SHARED_CONTRACTS.md, Section 14)
+
+seed: 42
+
+paths:                            # repository-relative
+  outputs_root: outputs
+  data_root: data
+  test_log: outputs/test_log.md
+
+visualization:                    # Member 4
+  overlay_line_width: 2
+  overlay_font_scale: 0.6
+  overlay_video_fps: 25
+  figure_dpi: 150
+
+workload:                         # Member 4, Phase 3 (external-load indicators only, no physiological claims)
+  pitch_length_m: 105.0
+  pitch_width_m: 68.0
+  smoothing: {method: savgol, window_frames: 13, polyorder: 2}   # TODO(Member 4, Phase 3): justify on GT tracks
+  high_speed_mps: 5.5
+  sprint_mps: 7.0
+  accel_event_mps2: 3.0

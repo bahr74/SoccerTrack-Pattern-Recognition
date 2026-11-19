@@ -1,0 +1,41 @@
+# Approach B (pretrained YOLO) configuration. Owner: Member 2.
+# Tune ONLY on the validation split (117093).
+
+weights_key: yolov8n_coco         # key in configs/data_sources.yaml -> weights
+classes: [0]                      # COCO "person"
+device: 0                         # GPU index or "cpu"
+half: false
+
+tiling:
+  tile_width: 1280
+  tile_height: 1080               # clamped to the real frame height (read from the video)
+  overlap_px: 64
+  imgsz: 1280                     # earlier reference (P 0.846, R 0.780) used imgsz 960; compare both on validation
+
+inference:
+  conf_floor: 0.05                # must equal evaluation.yaml score_floor so low-score detections are kept
+  iou_nms_in_tile: 0.5
+  max_det_per_tile: 300
+
+merge:
+  global_nms_iou: 0.5             # cross-tile duplicate removal (torchvision.ops.nms)
+  pitch_filter: false             # true -> drop boxes whose bottom-centre is outside outputs/masks/<match>_pitch.png
+
+operating_threshold: null         # set from validation results before the frozen test run
+
+bytetrack:                        # passed to ultralytics.trackers.byte_tracker.BYTETracker
+  track_high_thresh: 0.25
+  track_low_thresh: 0.1
+  new_track_thresh: 0.25
+  track_buffer: 30
+  match_thresh: 0.8
+  fuse_score: true
+  output_box: detection           # detection | kalman: which box is written to the Track table
+
+finetune:                         # Phase 3 only
+  base_weights_key: yolov8n_coco
+  tile_size: 640
+  epochs: 50
+  batch: 8
+  patience: 10
+  label_frame_stride: 10
