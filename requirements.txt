@@ -1,0 +1,32 @@
+# Pinned to the versions known to work together on the lead machine (Python 3.12.10, Windows 11, CUDA 12.6 wheels).
+# Install ONLY after team approval:  pip install -r requirements.txt   then   pip install -e . --no-deps
+--extra-index-url https://download.pytorch.org/whl/cu126
+
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.1
+scikit-learn==1.9.1
+joblib==1.6.0
+matplotlib==3.11.2
+opencv-python==5.0.0.93
+pyyaml==6.0.3
+tqdm==4.70.1
+
+torch==2.9.1+cu126
+torchvision==0.24.1+cu126
+ultralytics==8.4.182
+lap==0.5.13
+
+trackeval==1.3.0
+pycocotools==2.0.11
+
+pytest==9.1.1
+
+# UNPINNED (not present in the reference environment, so no verified version exists yet):
+#   huggingface_hub  - only for scripts/download_test_matches.py
+#   ipykernel, nbconvert - notebook kernel and `jupyter nbconvert --execute`
+# After the first approved install, Member 4 replaces these three lines with the installed versions
+# (`pip show huggingface_hub ipykernel nbconvert`) so every member gets the same environment.
+huggingface_hub
+ipykernel
+nbconvert

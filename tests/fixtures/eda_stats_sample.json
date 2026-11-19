@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "created_utc": "2026-11-19T00:00:00Z",
+  "matches": {
+    "999001": {
+      "split": "val", "image_width": 640, "image_height": 360, "fps": 25.0,
+      "frames_annotated": 3, "frames_decoded": 3, "boxes": 9, "ids": 3,
+      "boxes_per_frame": {"min": 3, "max": 3, "mean": 3.0},
+      "box_width_px": {"p05": 18.0, "median": 20.0, "p95": 20.0},
+      "box_height_px": {"p05": 40.0, "median": 45.0, "p95": 45.0},
+      "track_length_frames": {"min": 3, "median": 3, "max": 3},
+      "issues": {"degenerate_boxes": 0, "clipped_boxes": 0, "duplicate_rows": 0, "frames_not_expected": 0}
+    },
+    "999002": {
+      "split": "train", "image_width": 640, "image_height": 360, "fps": 25.0,
+      "frames_annotated": 4, "frames_decoded": 4, "boxes": 11, "ids": 3,
+      "boxes_per_frame": {"min": 2, "max": 3, "mean": 2.75},
+      "box_width_px": {"p05": 10.0, "median": 20.0, "p95": 20.0},
+      "box_height_px": {"p05": 40.0, "median": 45.0, "p95": 45.0},
+      "track_length_frames": {"min": 3, "median": 4, "max": 4},
+      "issues": {"degenerate_boxes": 1, "clipped_boxes": 1, "duplicate_rows": 1, "frames_not_expected": 1}
+    }
+  },
+  "totals": {"matches": 2, "frames": 7, "boxes": 20},
+  "paper_reference": {"frames": 59842, "boxes": 1316524, "median_box_wh_px": [25, 55]}
+}

@@ -32,3 +32,15 @@ wandb/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Project-specific (added for the team repository skeleton)
+configs/data_sources.yaml
+*.npz
+*.npy
+*.joblib
+*.egg-info/
+build/
+pip_cache/
+tmp/
+hf_cache/
+.hf_token

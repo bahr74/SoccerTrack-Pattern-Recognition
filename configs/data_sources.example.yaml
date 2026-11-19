@@ -1,0 +1,26 @@
+# TEMPLATE (committed). Copy to configs/data_sources.yaml (git-ignored) and replace the placeholders with
+# absolute paths on your machine. Use forward slashes. Never commit configs/data_sources.yaml. Never put tokens here.
+#   <ST_LOCAL> = folder holding the existing SoccerTrack v2 v1.2 files (lead-machine values: docs/team/SETUP_AND_DATA.md, Section 6)
+#   <REPO>     = this repository (your clone)
+# Members without <ST_LOCAL> point train/val entries at their own download under <REPO>/data/raw/soccertrack-v2/.
+
+matches:
+  "117092": {mot: <ST_LOCAL>/data/raw/soccertrack_v2/mot/117092.txt, clip: <ST_LOCAL>/data/raw/soccertrack_v2/mot/117092.mp4, calibration_dir: <ST_LOCAL>/data/external/soccertrack-v2/raw/117092}
+  "117093": {mot: <ST_LOCAL>/data/external/soccertrack-v2/mot/117093.txt, clip: <ST_LOCAL>/data/external/soccertrack-v2/raw/117093/117093.mp4, calibration_dir: <ST_LOCAL>/data/external/soccertrack-v2/raw/117093}
+  "118575": {mot: <ST_LOCAL>/data/external/soccertrack-v2/mot/118575.txt, clip: <ST_LOCAL>/data/external/soccertrack-v2/mot/clips/118575.mp4, calibration_dir: <ST_LOCAL>/data/external/soccertrack-v2/raw/118575}
+  "118576": {mot: <ST_LOCAL>/data/external/soccertrack-v2/mot/118576.txt, clip: <ST_LOCAL>/data/external/soccertrack-v2/mot/clips/118576.mp4, calibration_dir: <ST_LOCAL>/data/external/soccertrack-v2/raw/118576}
+  "118577": {mot: <ST_LOCAL>/data/external/soccertrack-v2/mot/118577.txt, clip: <ST_LOCAL>/data/external/soccertrack-v2/mot/clips/118577.mp4, calibration_dir: null}
+  "118578": {mot: <ST_LOCAL>/data/external/soccertrack-v2/mot/118578.txt, clip: <ST_LOCAL>/data/external/soccertrack-v2/mot/clips/118578.mp4, calibration_dir: null}
+  "128058": {mot: <ST_LOCAL>/data/external/soccertrack-v2/mot/128058.txt, clip: <ST_LOCAL>/data/external/soccertrack-v2/mot/clips/128058.mp4, calibration_dir: null}
+  "128057": {mot: <REPO>/data/raw/soccertrack-v2/mot/128057.txt, clip: <REPO>/data/raw/soccertrack-v2/mot/clips/128057.mp4, calibration_dir: <REPO>/data/raw/soccertrack-v2/raw/128057}
+  "132831": {mot: <REPO>/data/raw/soccertrack-v2/mot/132831.txt, clip: <REPO>/data/raw/soccertrack-v2/mot/clips/132831.mp4, calibration_dir: <REPO>/data/raw/soccertrack-v2/raw/132831}
+  "132877": {mot: <REPO>/data/raw/soccertrack-v2/mot/132877.txt, clip: <REPO>/data/raw/soccertrack-v2/mot/clips/132877.mp4, calibration_dir: null}
+
+read_only_roots:                  # code must never write below these folders
+  - <ST_LOCAL>
+
+weights:
+  yolov8n_coco: <ST_LOCAL>/models/yolov8n.pt
+  yolov8s_coco: <ST_LOCAL>/models/yolov8s.pt
+
+manifest: <REPO>/data/manifests/soccertrack_v1.2_download_manifest.json   # optional hash manifest (copy needs approval)
