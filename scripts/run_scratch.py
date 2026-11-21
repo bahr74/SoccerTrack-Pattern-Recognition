@@ -17,6 +17,12 @@ Test split: add --frozen-test (only during the logged frozen test run).
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
+import json
+import time
+from datetime import datetime, timezone
+
+from soccertrack import config, contracts, data_io, split, patches, classifiers, detector_scratch, tracker_iou, segmentation
 
 COMMANDS = ("eda", "segment", "patches", "train-svm", "train-cnn", "score-patches", "detect", "track")
 
@@ -35,10 +41,94 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    # TODO(Member 1): load config (config.load_config / load_data_sources), call split.require_test_access,
-    # dispatch to data_io / segmentation / patches / classifiers / detector_scratch / tracker_iou,
-    # and call split.log_test_access after a successful test-split run.
-    raise NotImplementedError(f"TODO(Member 1): command '{args.command}'")
+    split.require_test_access(args.split, args.frozen_test)
+    cfg = config.load_config()  # official runner never falls back to demo YAML loading
+    root = config.repo_root()
+    outputs = root / cfg['project']['paths']['outputs_root']
+    if args.command == 'eda':
+        if args.split == 'test': raise PermissionError('EDA does not access held-out data')
+        sources = config.load_data_sources()
+        splits = {name: split.matches_for(name, cfg) for name in ('train','val')}
+        stats = data_io.compute_eda_stats(splits, sources)
+        folder = outputs / 'eda'; folder.mkdir(parents=True, exist_ok=True)
+        (folder / 'stats.json').write_text(json.dumps(stats, indent=2, allow_nan=False)+'\n', encoding='utf-8')
+        if 'box_sample' not in contracts.TABLE_SCHEMAS:
+            raise NotImplementedError('stats.json computed; box_sample.csv requires a registered Member 3 table kind')
+        import pandas as pd
+        samples=[]
+        for match, item in stats['matches'].items():
+            frame=data_io.load_gt_tracks(match,sources).iloc[::7].assign(match=match,split=item['split'])
+            samples.append(frame[['match','split','frame','x','y','w','h']])
+        if samples: contracts.write_table(pd.concat(samples,ignore_index=True),folder/'box_sample.csv','box_sample')
+        return
+    if args.command in ('train-svm','train-cnn'):
+        train = _load_patches('train', cfg)
+        val = _load_patches('val', cfg)
+        sc = dict(cfg['scratch'], project=cfg['project'])
+        if args.command == 'train-svm':
+            model=classifiers.HogSvmClassifier(sc).fit_with_validation(train['X'],train['y'],val['X'],val['y'])
+            model.save(outputs/'models/scratch_hog_svm/model.joblib')
+        else:
+            model=classifiers.CnnClassifier(sc)
+            history=model.fit(train['X'],train['y'],val['X'],val['y'])
+            folder=outputs/'models/scratch_cnn'; model.save(folder/'model.pt')
+            (folder/'history.json').write_text(json.dumps(history,indent=2)+'\n',encoding='utf-8')
+        return
+    if args.command == 'score-patches':
+        arrays=_load_patches(args.split,cfg)
+        model=classifiers.load_classifier(args.detector)
+        import pandas as pd
+        table=pd.DataFrame({'sample_id':range(len(arrays['y'])),'match':arrays['match'],'frame':arrays['frame'],
+                            'kind':arrays['kind'],'y_true':arrays['y'],'score':model.predict_proba(arrays['X'])})
+        # Metadata for aggregate patch sets has not been specified in the shared
+        # per-match run sidecar. Do not invent an official metadata convention.
+        raise NotImplementedError('Patch scores computed; aggregate patch-score metadata needs Member 3 clarification')
+    sources=config.load_data_sources()
+    if args.command == 'patches':
+        arrays=patches.build_patch_set(args.split,cfg,sources,args.frozen_test)
+        path=root/cfg['project']['paths']['data_root']/f'processed/patches/patches_{args.split}.npz'
+        patches.save_patch_set(arrays,path)
+        if args.split=='test': split.log_test_access('Member 1','patches',[path.relative_to(root).as_posix()],{})
+        return
+    matches=[args.match] if args.match else split.matches_for(args.split,cfg)
+    for match in matches:
+        if split.split_of(match,cfg)!=args.split: raise ValueError('Match/split mismatch')
+        if args.command=='detect':
+            detector_scratch.run_detection(args.detector,match,args.split,args.frameset,cfg,sources,args.frozen_test)
+        elif args.command=='track':
+            source=config.artifact_path('detections',args.detector,args.split,match,args.frameset)
+            detections=contracts.read_table(source,'detections'); meta=contracts.read_run_meta(source)
+            frames=range(meta['frames']['start'],meta['frames']['stop'],meta['frames']['stride'])
+            settings=dict(cfg['scratch']); settings['tracker_iou']=dict(settings['tracker_iou'])
+            if settings['tracker_iou']['min_score'] is None: settings['tracker_iou']['min_score']=meta['operating_threshold']
+            start=time.perf_counter(); tracks=tracker_iou.track_sequence(detections,frames,settings); seconds=time.perf_counter()-start
+            pipeline=contracts.pipeline_id(args.detector,'iou_hungarian')
+            target=config.artifact_path('tracks',pipeline,args.split,match,args.frameset)
+            contracts.write_table(tracks,target,'tracks')
+            contracts.write_run_meta(dict(meta,kind='tracks',tracker='iou_hungarian',runtime_seconds=seconds,
+                                           config_sha256=config.config_sha256(),
+                                           created_utc=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+                                           frames_per_second=len(frames)/max(seconds,1e-9)),target)
+            if args.split=='test': split.log_test_access('Member 1',pipeline,[target.relative_to(root).as_posix()],{})
+        elif args.command=='segment':
+            import cv2
+            paths=config.match_paths(match,sources); info=data_io.video_info(paths.clip)
+            count=data_io.count_decoded_frames(paths.clip); sc=cfg['scratch']; scale=sc['segmentation']['work_scale']
+            background=segmentation.estimate_background(paths.clip,sc['sampling']['background_num_frames'],count,scale)
+            mask=segmentation.pitch_mask(background,sc,match,paths.calibration_dir)
+            segmentation.save_pitch_mask(mask,match,(info['width'],info['height']))
+            folder=outputs/'backgrounds'; folder.mkdir(parents=True,exist_ok=True)
+            if not cv2.imwrite(str(folder/f'{match}.png'),background): raise OSError('Background write failed')
+        else: raise ValueError(f'Unsupported command {args.command}')
+
+
+def _load_patches(name, cfg):
+    root=config.repo_root()
+    arrays=patches.load_patch_set(root/cfg['project']['paths']['data_root']/f'processed/patches/patches_{name}.npz')
+    meta=json.loads(arrays['meta_json'][0])
+    if meta['split']!=name or not set(arrays['match']).issubset(split.matches_for(name,cfg)):
+        raise PermissionError('Patch-set split/provenance mismatch')
+    return arrays
 
 
 if __name__ == "__main__":
