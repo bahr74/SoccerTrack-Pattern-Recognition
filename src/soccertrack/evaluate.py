@@ -482,9 +482,89 @@ def evaluate_tracking(tracks_csv: Path, gt_tracks: "pd.DataFrame", cfg: dict[str
                      inputs, cfg)
 
 
-def pool_metrics(per_match: list[dict[str, Any]]) -> dict[str, Any]:
-    """Pooled result (match = "pooled"): recompute from summed counts where possible, never average ratios."""
-    raise NotImplementedError("TODO(Member 3, M4)")
+def pool_metrics(per_match: list[dict[str, Any]], ap: dict[str, float | None] | None = None) -> dict[str, Any]:
+    """Pooled result (match = "pooled"): recompute from summed counts where possible, never average ratios.
+
+    Why: averaging ratios gives a small match the same weight as a big one. Summing TP/FP/FN first and then
+    dividing weights every box equally.
+      E1/E2  sum TP/FP/TN/FN -> sensitivity, specificity, precision, F1, accuracy. ROC-AUC/PR-AUC need the raw
+             scores, so they are null here (E1 is already computed on the whole split).
+      E3     sum frames/GT/pred/TP/FP/FN -> P, R, F1, FP per frame. AP needs every detection pooled, so it is
+             passed in through `ap` (see pooled_detection_ap); otherwise null.
+      E4     MOTA and IDF1 from summed counts (exact); HOTA/DetA/AssA/LocA as the frame-weighted mean of the
+             matches (stated in params.pooling).
+    """
+    if not per_match:
+        raise ValueError("pool_metrics needs at least one per-match Metrics JSON")
+    first = per_match[0]
+    for doc in per_match:
+        contracts.validate_metrics(doc)
+        for key in ("eval_id", "method", "split", "frameset"):
+            if doc[key] != first[key]:
+                raise ValueError(f"cannot pool runs with different {key}: {first[key]} vs {doc[key]}")
+    if len({doc["match"] for doc in per_match}) != len(per_match):
+        raise ValueError("each match may appear only once in a pooled result")
+    task = first["task"]
+    counts: dict[str, int] = {}
+    for doc in per_match:
+        for key, value in doc["counts"].items():
+            counts[key] = counts.get(key, 0) + int(value)
+    c = counts
+    if task in ("patch_classification", "proposal_classification"):
+        precision, sensitivity, f1 = M.precision_recall_f1(c["tp"], c["fp"], c["fn"])
+        total = c["tp"] + c["fp"] + c["tn"] + c["fn"]
+        values = {"sensitivity": sensitivity, "specificity": c["tn"] / (c["tn"] + c["fp"]) if c["tn"] + c["fp"] else 0.0,
+                  "precision": precision, "f1": f1, "accuracy": (c["tp"] + c["tn"]) / total if total else 0.0,
+                  "roc_auc": None, "pr_auc": None}
+        method = "sum of counts; ROC-AUC and PR-AUC need pooled scores"
+    elif task == "detection":
+        precision, recall, f1 = M.precision_recall_f1(c["tp"], c["fp"], c["fn"])
+        values = {"precision": precision, "recall": recall, "f1": f1,
+                  "ap50": (ap or {}).get("ap50"), "ap50_95": (ap or {}).get("ap50_95"),
+                  "fp_per_frame": c["fp"] / c["frames"] if c["frames"] else 0.0}
+        method = "sum of counts; AP from detections pooled across matches" if ap else "sum of counts; AP not pooled"
+    elif task == "tracking":
+        frames = [doc["counts"]["frames"] for doc in per_match]
+        weighted = lambda key: sum(doc["metrics"][key] * n for doc, n in zip(per_match, frames)) / sum(frames)
+        idsw = sum(int(doc["metrics"]["idsw"]) for doc in per_match)
+        values = {k: weighted(k) for k in ("hota", "deta", "assa", "loca")}
+        values["idsw"] = idsw
+        values["mota"] = 1 - (c["fn"] + c["fp"] + idsw) / c["gt"] if c["gt"] else 0.0
+        values["idf1"] = 2 * c["idtp"] / (2 * c["idtp"] + c["idfp"] + c["idfn"]) if c["idtp"] else 0.0
+        method = "MOTA, IDF1, IDSW from summed counts; HOTA, DetA, AssA, LocA frame-weighted mean of matches"
+    else:
+        raise ValueError(f"unknown task {task}")
+    params = dict(first["params"], pooling=method, matches=sorted(doc["match"] for doc in per_match))
+    inputs = {"per_match_run_ids": [doc["run_id"] for doc in per_match]}
+    return _document(first["eval_id"], first["method"], first["split"], "pooled", first["frameset"], params,
+                     counts, values, inputs, {})
+
+
+def pooled_detection_ap(runs: list[tuple[Path, "pd.DataFrame"]], cfg: dict[str, Any]) -> dict[str, float | None]:
+    """AP@0.5 and AP@[.5:.95] with the detections of several matches pooled into ONE ranked list.
+
+    runs = [(detections_csv, gt_tracks_of_that_match), ...]. AP is not a sum of counts, so it cannot be pooled
+    from the per-match JSON files; it is recomputed here from the raw tables.
+    """
+    import numpy as np
+
+    ev = _ev(cfg)
+    start, stop, step = ev["detection"]["ap_iou_range"]
+    loaded = []
+    for csv_path, gt_tracks in runs:
+        det = contracts.read_table(csv_path, "detections")
+        meta = contracts.read_run_meta(csv_path)
+        frames = _frames(meta)
+        loaded.append((det, _gt_in_frames(gt_tracks, frames), frames))
+    aps = {}
+    for iou in np.round(np.arange(start, stop + step / 2, step), 2):
+        flags, scores, num_gt = [], [], 0
+        for det, gt, frames in loaded:
+            r = _match_all(det, gt, frames, float(iou))
+            flags.append(r["flags"]); scores.append(r["scores"]); num_gt += len(gt)
+        aps[float(iou)] = M.average_precision(np.concatenate(flags), np.concatenate(scores), num_gt)[0]
+    values = list(aps.values())
+    return {"ap50": aps.get(0.5), "ap50_95": None if any(v is None for v in values) else float(np.mean(values))}
 
 
 def write_metrics(metrics: dict[str, Any], out_dir: Path | None = None) -> Path:
