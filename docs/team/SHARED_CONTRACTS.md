@@ -406,11 +406,13 @@ A synthetic 3-frame sequence: image 640 × 360, 25 fps, 3 players.
 | `tracks_pred.csv` | Predicted tracks with one ID switch and two misses | MOTA = 0.6667 (FN 2, FP 0, IDSW 1, GT 9); IDF1 = 0.7500 (IDTP 6, IDFP 1, IDFN 3) |
 | `tracks_pred.meta.json` | Matching metadata | — |
 | `proposals_sample.csv` | 6 scored proposals | — |
+| `proposals_sample.meta.json` | Matching metadata (`scratch_hog_svm`, `fixture3`, operating threshold 0.5) | E2: 4 positives (IoU ≥ 0.5); TP 4, FP 0, TN 2, FN 0 |
 | `patch_scores_sample.csv` | 8 patch scores | At threshold 0.5 (score ≥ threshold → positive): TP 3, FN 1, TN 3, FP 1 → Sensitivity 0.75, Specificity 0.75; ROC-AUC 0.9375 |
+| `patch_scores_sample.meta.json` | Matching metadata (`kind: patch_scores`; `match`, `frameset`, `frames` and image size are `null` because a patch-score table covers a whole split) | — |
 | `metrics_sample.json` | A valid E3 Metrics JSON for the fixture detections | Passes `validate_metrics`; all values are the hand-computed ones above except `ap50_95`, which is illustrative |
 | `eda_stats_sample.json` | A valid EDA statistics file (2 synthetic matches) | — |
 | `pitch_tracks_sample.csv` | Phase 3 PitchTrack example (one player moving at a constant 5 m/s) | Distance over 1 s (25 frames, 0.2 m per frame) = 4.8 m between first and last row; speed 5.0 m/s |
-| `trackeval_example/` | Expected TrackEval export of `tracks_gt.csv` and `tracks_pred.csv` | Byte-for-byte target for `export_trackeval` |
+| `trackeval_example/` | Expected TrackEval export of `tracks_gt.csv` and `tracks_pred.csv` | Byte-for-byte target for `export_trackeval`. The tracker file sits in a `data/` folder that `.gitignore` hides, so it must be added with `git add -f` |
 
 Synthetic images, patches and videos are **generated in memory** by the test helpers in `tests/conftest.py`. No binary fixtures are committed.
 

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "kind": "patch_scores",
+  "method": "scratch_hog_svm",
+  "tracker": null,
+  "split": "val",
+  "match": null,
+  "frameset": null,
+  "frames": null,
+  "image_width": null,
+  "image_height": null,
+  "fps": null,
+  "score_floor": null,
+  "operating_threshold": 0.5,
+  "frozen_test": false,
+  "config_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "git_commit": null,
+  "created_utc": "2026-11-19T00:00:00Z",
+  "runtime_seconds": 0.0,
+  "frames_per_second": null,
+  "device": "synthetic",
+  "notes": "Synthetic fixture. See SHARED_CONTRACTS.md section 15 for hand-computed expectations."
+}
