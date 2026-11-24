@@ -69,8 +69,61 @@ def test_02(fixtures_dir, gt, cfg):
         C.validate_metrics(doc)
 
 
-@pytest.mark.skip(reason="TODO(Member 3, M2): gt_as_detections and noisy_gt_detections produce valid Detection tables; noisy drop rate within tolerance")
-def test_03(): ...
+def _many_gt(n_frames=200, players=22, size=(4096, 1080), seed=1):
+    """A large synthetic GT Track table (players walking slowly), for statistical checks."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    start = np.column_stack([rng.uniform(0, size[0] - 40, players), rng.uniform(0, size[1] - 70, players)])
+    rows = []
+    for f in range(n_frames):
+        pos = np.clip(start + f * 0.5, 0, [size[0] - 30, size[1] - 60])
+        rows += [[f, i + 1, x, y, 20.0, 45.0, 1.0] for i, (x, y) in enumerate(pos)]
+    return pd.DataFrame(rows, columns=C.TRACK_COLUMNS)
+
+
+def test_03(gt, fixtures_dir):
+    oracle = E.gt_as_detections(gt)
+    meta = C.read_run_meta(fixtures_dir / "detections_sample.csv")
+    C.validate_detections(oracle, dict(meta, method="gt_oracle"))
+    assert len(oracle) == len(gt) and (oracle.score == 1.0).all()
+
+    big = _many_gt()
+    noisy = E.noisy_gt_detections(big, drop_rate=0.10, jitter_px=2.0, seed=42, image_size=(4096, 1080))
+    C.validate_detections(noisy)
+    C.validate_detections(noisy, dict(meta, method="gt_noisy", image_width=4096, image_height=1080,
+                                      frames={"start": 0, "stop": 200, "stride": 1}))
+    kept = len(noisy) / len(big)
+    assert 0.88 <= kept <= 0.92                                   # about 10 % dropped
+    assert noisy.score.between(0.3, 1.0).all()
+    same = E.noisy_gt_detections(big, 0.10, 2.0, 42, (4096, 1080))
+    pd.testing.assert_frame_equal(noisy, same)                    # fixed seed -> identical on every machine
+    # Without drops, the noise is centred on the truth: the average box barely moves.
+    centred = E.noisy_gt_detections(big, 0.0, 2.0, 7, (4096, 1080))
+    assert len(centred) == len(big)
+    assert abs(centred.x.mean() - big.x.mean()) < 0.1 and abs(centred.w.mean() - 20.0) < 0.1
+
+
+def test_noisy_boxes_are_clipped_to_the_image(fixtures_dir):
+    edge = pd.DataFrame([[0, 1, 0.0, 0.0, 20.0, 45.0, 1.0], [0, 2, 620.0, 315.0, 20.0, 45.0, 1.0]],
+                        columns=C.TRACK_COLUMNS)
+    for seed in range(20):
+        noisy = E.noisy_gt_detections(edge, 0.0, 5.0, seed, image_size=(640, 360))
+        C.validate_detections(noisy, {"image_width": 640, "image_height": 360,
+                                      "frames": {"start": 0, "stop": 1, "stride": 1}, "score_floor": 0.05})
+
+
+def test_write_oracle_detections(gt, cfg, tmp_path):
+    paths = E.write_oracle_detections(gt, "val", "999001", "fixture3", range(0, 3), (640, 360), 25.0, cfg,
+                                      outputs_root=tmp_path)
+    assert paths["gt_oracle"] == tmp_path / "detections/gt_oracle/val/999001__fixture3.csv"
+    for detector, path in paths.items():
+        meta = C.read_run_meta(path)
+        assert meta["method"] == detector
+        C.validate_detections(C.read_table(path, "detections"), meta)
+    # The oracle evaluated with E3 is perfect.
+    m = E.evaluate_detections(paths["gt_oracle"], gt, cfg)["metrics"]
+    assert m["precision"] == m["recall"] == m["ap50"] == 1.0
 
 
 @pytest.mark.skip(reason="TODO(Member 3, M3): export_trackeval(tracks_gt.csv, tracks_pred.csv) reproduces tests/fixtures/trackeval_example byte for byte")

@@ -138,13 +138,90 @@ def _classification_document(eval_id: str, y_true, scores, threshold: float, met
 
 # ---- Oracle inputs for tracker validation (used by Members 1 and 2) --------------------------------------------
 def gt_as_detections(gt_tracks: "pd.DataFrame") -> "pd.DataFrame":
-    """Detector `gt_oracle`: drop track_id, keep score 1.0."""
-    raise NotImplementedError("TODO(Member 3, M2)")
+    """Detector `gt_oracle`: drop track_id, keep score 1.0.
+
+    A "perfect detector": the real boxes, without identities. Feeding it to a tracker measures the tracker ALONE,
+    because every tracking error must then come from the association step, not from detection mistakes.
+    """
+    det = gt_tracks.loc[:, list(contracts.DETECTION_COLUMNS)].copy()
+    det["score"] = 1.0
+    return det.sort_values(["frame"], kind="mergesort").reset_index(drop=True)
 
 
-def noisy_gt_detections(gt_tracks: "pd.DataFrame", drop_rate: float, jitter_px: float, seed: int) -> "pd.DataFrame":
-    """Detector `gt_noisy`: randomly drop boxes, jitter coordinates, assign scores in [0.3, 1.0]; clip to image."""
-    raise NotImplementedError("TODO(Member 3, M2)")
+def noisy_gt_detections(gt_tracks: "pd.DataFrame", drop_rate: float, jitter_px: float, seed: int,
+                        image_size: tuple[int, int] | None = None) -> "pd.DataFrame":
+    """Detector `gt_noisy`: randomly drop boxes, jitter coordinates, assign scores in [0.3, 1.0]; clip to image.
+
+    A "realistic but controlled" detector: some players are missed (drop_rate), boxes are slightly off
+    (Gaussian noise with standard deviation jitter_px on x, y, w, h) and confidences vary. The fixed seed makes the
+    result identical on every machine, so both trackers see exactly the same noisy input.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    keep = rng.random(len(gt_tracks)) >= drop_rate
+    det = gt_tracks.loc[keep, list(contracts.DETECTION_COLUMNS)].copy().reset_index(drop=True)
+    boxes = det[_BOX].to_numpy(dtype=float) + rng.normal(0.0, jitter_px, (len(det), 4))
+    x1, y1 = boxes[:, 0], boxes[:, 1]
+    x2, y2 = x1 + boxes[:, 2], y1 + boxes[:, 3]
+    x1, y1 = np.maximum(x1, 0.0), np.maximum(y1, 0.0)               # clip to the image
+    if image_size is not None:
+        x2, y2 = np.minimum(x2, image_size[0]), np.minimum(y2, image_size[1])
+    # Keep every box valid (w, h > 1) even after noise and clipping.
+    x2, y2 = np.maximum(x2, x1 + 2.0), np.maximum(y2, y1 + 2.0)
+    if image_size is not None:
+        x1, y1 = np.minimum(x1, x2 - 2.0), np.minimum(y1, y2 - 2.0)
+    det[_BOX] = np.column_stack([x1, y1, x2 - x1, y2 - y1]).round(2)
+    det["score"] = rng.uniform(0.3, 1.0, len(det)).round(4)
+    return det.sort_values(["frame", "score"], ascending=[True, False], kind="mergesort").reset_index(drop=True)
+
+
+def oracle_detection_path(detector: str, split: str, match: str, frameset: str, outputs_root: Path | None = None) -> Path:
+    """outputs/detections/<detector>/<split>/<match>__<frameset>.csv (Contracts §2)."""
+    root = Path(outputs_root) if outputs_root is not None else REPO_ROOT / "outputs"
+    return root / "detections" / detector / split / f"{match}__{frameset}.csv"
+
+
+def write_oracle_detections(gt_tracks: "pd.DataFrame", split: str, match: str, frameset: str, frames: range,
+                            image_size: tuple[int, int], fps: float, cfg: dict[str, Any],
+                            outputs_root: Path | None = None, frozen_test: bool = False) -> dict[str, Path]:
+    """Write the `gt_oracle` and `gt_noisy` Detection tables + metadata for one clip and frameset.
+
+    These are the shared inputs that Members 1 and 2 feed to their trackers for the oracle rows of E4.
+    """
+    import time
+    from datetime import datetime, timezone
+
+    ev = _ev(cfg)
+    noise = ev["oracle"]["noisy_gt"]
+    gt = _gt_in_frames(gt_tracks, frames)
+    provenance = _provenance(cfg)
+    written = {}
+    for detector in ("gt_oracle", "gt_noisy"):
+        start = time.perf_counter()
+        if detector == "gt_oracle":
+            det = gt_as_detections(gt)
+        else:
+            det = noisy_gt_detections(gt, noise["drop_rate"], noise["jitter_px"], noise["seed"], image_size)
+        seconds = time.perf_counter() - start
+        meta = {
+            "schema_version": contracts.SCHEMA_VERSION, "kind": "detections", "method": detector, "tracker": None,
+            "split": split, "match": match, "frameset": frameset,
+            "frames": {"start": frames.start, "stop": frames.stop, "stride": frames.step},
+            "image_width": int(image_size[0]), "image_height": int(image_size[1]), "fps": float(fps),
+            "score_floor": float(ev["score_floor"]), "operating_threshold": 0.0 if detector == "gt_oracle" else 0.3,
+            "frozen_test": frozen_test, "config_sha256": provenance["config_sha256"], "git_commit": None,
+            "created_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "runtime_seconds": round(seconds, 4), "frames_per_second": None, "device": "cpu",
+            "notes": "oracle input" if detector == "gt_oracle" else
+                     f"noisy oracle: drop {noise['drop_rate']}, jitter {noise['jitter_px']} px, seed {noise['seed']}",
+        }
+        contracts.validate_detections(det, meta)
+        path = oracle_detection_path(detector, split, match, frameset, outputs_root)
+        contracts.write_table(det, path, "detections")
+        contracts.write_run_meta(meta, path)
+        written[detector] = path
+    return written
 
 
 # ---- E1-E4 -------------------------------------------------------------------------------------------------------
