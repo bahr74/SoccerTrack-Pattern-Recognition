@@ -14,8 +14,26 @@ if TYPE_CHECKING:
 
 
 def iou_matrix(boxes_a: "np.ndarray", boxes_b: "np.ndarray") -> "np.ndarray":
-    """Pairwise IoU between [N, 4] and [M, 4] xywh boxes -> [N, M]."""
-    raise NotImplementedError("TODO(Member 3, M0)")
+    """Pairwise IoU between [N, 4] and [M, 4] xywh boxes -> [N, M].
+
+    IoU = area(A ∩ B) / area(A ∪ B) = inter / (area_a + area_b - inter). 1 = identical boxes, 0 = no overlap.
+    Vectorised with broadcasting: row i, column j compares boxes_a[i] with boxes_b[j].
+    """
+    import numpy as np
+
+    a = np.asarray(boxes_a, dtype=float).reshape(-1, 4)
+    b = np.asarray(boxes_b, dtype=float).reshape(-1, 4)
+    if len(a) == 0 or len(b) == 0:
+        return np.zeros((len(a), len(b)))
+    # Corners: (x1, y1) = top-left, (x2, y2) = bottom-right.
+    ax1, ay1, ax2, ay2 = a[:, 0, None], a[:, 1, None], (a[:, 0] + a[:, 2])[:, None], (a[:, 1] + a[:, 3])[:, None]
+    bx1, by1, bx2, by2 = b[None, :, 0], b[None, :, 1], (b[:, 0] + b[:, 2])[None, :], (b[:, 1] + b[:, 3])[None, :]
+    # Width/height of the overlap rectangle; negative means "no overlap", so clip at 0.
+    inter_w = np.clip(np.minimum(ax2, bx2) - np.maximum(ax1, bx1), 0, None)
+    inter_h = np.clip(np.minimum(ay2, by2) - np.maximum(ay1, by1), 0, None)
+    inter = inter_w * inter_h
+    union = (a[:, 2] * a[:, 3])[:, None] + (b[:, 2] * b[:, 3])[None, :] - inter
+    return np.divide(inter, union, out=np.zeros_like(inter), where=union > 0)
 
 
 def match_frame(gt: "np.ndarray", det: "np.ndarray", scores: "np.ndarray", iou_threshold: float) -> dict[str, Any]:

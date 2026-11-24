@@ -8,8 +8,21 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.skip(reason="TODO(Member 3, M0): iou_matrix: identical boxes give 1, disjoint boxes 0, (500,140,18,40) vs (510,150,18,40) gives 0.2")
-def test_01(): ...
+def test_01():
+    np = pytest.importorskip("numpy")
+    from soccertrack.metrics import iou_matrix
+
+    a = np.array([[500, 140, 18, 40]])
+    assert iou_matrix(a, a)[0, 0] == pytest.approx(1.0)
+    assert iou_matrix(a, np.array([[0, 0, 10, 10]]))[0, 0] == 0.0
+    # Overlap 8 x 30 = 240; union 720 + 720 - 240 = 1200; IoU = 0.2.
+    assert iou_matrix(a, np.array([[510, 150, 18, 40]]))[0, 0] == pytest.approx(0.2)
+    # Touching edges share no area.
+    assert iou_matrix(a, np.array([[518, 140, 18, 40]]))[0, 0] == 0.0
+    # Shape [N, M] and empty inputs.
+    m = iou_matrix(np.zeros((3, 4)) + [0, 0, 5, 5], np.zeros((2, 4)) + [0, 0, 5, 5])
+    assert m.shape == (3, 2)
+    assert iou_matrix(np.zeros((0, 4)), a).shape == (0, 1)
 
 
 @pytest.mark.skip(reason="TODO(Member 3, M1): detections_sample.csv vs tracks_gt.csv at IoU 0.5 and threshold 0.5: TP 7, FP 1, FN 2, P 0.8750, R 0.7778, F1 0.8235")
