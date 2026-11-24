@@ -202,7 +202,8 @@ def test_table_round_trip(fixtures_dir, tmp_path, name, kind):
     again = C.read_table(out, kind)
     pd.testing.assert_frame_equal(original.reset_index(drop=True), again)
     # Committed fixtures are already in the canonical format, so the bytes are identical too.
-    assert out.read_bytes() == (fixtures_dir / name).read_bytes()
+    # (A Windows checkout may turn the committed file's line endings into CRLF; we always write LF.)
+    assert out.read_bytes() == (fixtures_dir / name).read_bytes().replace(b"\r\n", b"\n")
 
 
 def test_write_table_sorts_and_rounds(tmp_path, gt):

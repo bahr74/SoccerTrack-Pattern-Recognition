@@ -362,17 +362,124 @@ def evaluate_detections(detections_csv: Path, gt_tracks: "pd.DataFrame", cfg: di
                      inputs, cfg, breakdown=breakdown, curves={"pr": curve} if curve["recall"] else None)
 
 
-def export_trackeval(gt_tracks: "pd.DataFrame", tracks_csv: Path, run_id: str) -> Path:
+def _sequence_name(meta: dict[str, Any]) -> str:
+    return f"{meta['match']}__{meta['frameset']}"
+
+
+def export_trackeval(gt_tracks: "pd.DataFrame", tracks_csv: Path, run_id: str,
+                     workspace_root: Path | None = None) -> Path:
     """Write the TrackEval workspace (Contracts §9): 1-based frames, GT conf/class/vis = 1, seqinfo.ini.
 
     Target output for the fixtures: tests/fixtures/trackeval_example/.
+    TrackEval expects the MOTChallenge text format, so this is the ONLY place where frames become 1-based:
+      frame_te = frame - frames.start + 1
+    Layout: <ws>/gt/<seq>/gt/gt.txt, <ws>/gt/<seq>/seqinfo.ini, <ws>/trackers/<pipeline>/data/<seq>.txt
     """
-    raise NotImplementedError("TODO(Member 3, M3)")
+    tracks = contracts.read_table(tracks_csv, "tracks")
+    meta = contracts.read_run_meta(tracks_csv)
+    if meta["kind"] != "tracks":
+        raise contracts.ContractError(f"{tracks_csv} is a '{meta['kind']}' artefact, not 'tracks'")
+    frames = _frames(meta)
+    if frames.step != 1:
+        raise contracts.ContractError("tracking framesets must have stride 1 (Contracts §9)")
+    contracts.validate_tracks(tracks, image_size=(meta["image_width"], meta["image_height"]))
+    _check_frames(tracks, frames, "tracks")
+    gt = _gt_in_frames(gt_tracks, frames)
+    pipeline = contracts.pipeline_id(meta["method"], meta["tracker"])
+    seq = _sequence_name(meta)
+    ws = (Path(workspace_root) if workspace_root is not None else REPO_ROOT / "outputs" / "trackeval") / run_id
+
+    def lines(table, tail):
+        out = []
+        for row in table.itertuples(index=False):
+            frame_te = int(row.frame) - frames.start + 1
+            out.append(f"{frame_te},{int(row.track_id)},{row.x:.2f},{row.y:.2f},{row.w:.2f},{row.h:.2f},{tail(row)}")
+        return "".join(line + "\n" for line in out)
+
+    gt_dir = ws / "gt" / seq
+    (gt_dir / "gt").mkdir(parents=True, exist_ok=True)
+    _write_text(gt_dir / "gt" / "gt.txt", lines(gt, lambda r: "1,1,1"))
+    fps = meta["fps"]
+    _write_text(gt_dir / "seqinfo.ini", "[Sequence]\n" f"name={seq}\n" "imDir=img1\n"
+                f"frameRate={int(fps) if float(fps).is_integer() else fps}\n" f"seqLength={len(frames)}\n"
+                f"imWidth={meta['image_width']}\n" f"imHeight={meta['image_height']}\n" "imExt=.jpg\n")
+    trk_dir = ws / "trackers" / pipeline / "data"
+    trk_dir.mkdir(parents=True, exist_ok=True)
+    _write_text(trk_dir / f"{seq}.txt", lines(tracks, lambda r: f"{r.score:.4f},-1,-1,-1"))
+    return ws
 
 
-def evaluate_tracking(tracks_csv: Path, gt_tracks: "pd.DataFrame", cfg: dict[str, Any]) -> dict[str, Any]:
-    """E4: export, run TrackEval (HOTA, CLEAR, Identity) with SKIP_SPLIT_FOL=True, return Metrics JSON content."""
-    raise NotImplementedError("TODO(Member 3, M3)")
+def _write_text(path: Path, text: str) -> None:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def _check_frames(table: "pd.DataFrame", frames: range, kind: str) -> None:
+    f = table["frame"]
+    if len(f) and ((f < frames.start) | (f >= frames.stop) | ((f - frames.start) % frames.step != 0)).any():
+        raise contracts.ContractError(f"{kind}: frames outside the metadata frameset {frames}")
+
+
+def evaluate_tracking(tracks_csv: Path, gt_tracks: "pd.DataFrame", cfg: dict[str, Any],
+                      workspace_root: Path | None = None, ground_truth: str | None = None) -> dict[str, Any]:
+    """E4: export, run TrackEval (HOTA, CLEAR, Identity) with SKIP_SPLIT_FOL=True, return Metrics JSON content.
+
+    HOTA = sqrt(DetA x AssA), averaged over IoU thresholds 0.05 ... 0.95 (TrackEval's alpha grid):
+      DetA  "are the players detected?"       AssA "do the IDs stay with the same player over time?"
+      LocA  "how well do the boxes fit?"
+    MOTA = 1 - (FN + FP + IDSW) / number of GT boxes   (can be negative)
+    IDF1 = 2 IDTP / (2 IDTP + IDFP + IDFN)            (identity-level F1 over the whole sequence)
+    IDSW = number of times a GT player's predicted ID changes.
+    """
+    import contextlib
+    import io
+
+    import numpy as np
+    import trackeval
+
+    meta = contracts.read_run_meta(tracks_csv)
+    pipeline = contracts.pipeline_id(meta["method"], meta["tracker"])
+    run_id = f"E4__{pipeline}__{meta['split']}__{meta['match']}__{meta['frameset']}"
+    ws = export_trackeval(gt_tracks, tracks_csv, run_id, workspace_root)
+    seq = _sequence_name(meta)
+    frames = _frames(meta)
+
+    eval_config = trackeval.Evaluator.get_default_eval_config()
+    eval_config.update({"USE_PARALLEL": False, "PRINT_RESULTS": False, "PRINT_ONLY_COMBINED": False,
+                        "PRINT_CONFIG": False, "TIME_PROGRESS": False, "DISPLAY_LESS_PROGRESS": True,
+                        "OUTPUT_SUMMARY": False, "OUTPUT_DETAILED": False, "PLOT_CURVES": False,
+                        "LOG_ON_ERROR": None, "BREAK_ON_ERROR": True})
+    dataset_config = trackeval.datasets.MotChallenge2DBox.get_default_dataset_config()
+    dataset_config.update({"GT_FOLDER": str(ws / "gt"), "TRACKERS_FOLDER": str(ws / "trackers"),
+                           "OUTPUT_FOLDER": str(ws / "results"), "TRACKERS_TO_EVAL": [pipeline],
+                           "CLASSES_TO_EVAL": ["pedestrian"], "BENCHMARK": "MOT17", "SPLIT_TO_EVAL": "train",
+                           "SEQ_INFO": {seq: len(frames)}, "SKIP_SPLIT_FOL": True, "DO_PREPROC": True,
+                           "PRINT_CONFIG": False, "TRACKER_SUB_FOLDER": "data"})
+    threshold = float(_ev(cfg).get("tracking", {}).get("similarity_threshold", 0.5))
+    metric_objects = [trackeval.metrics.HOTA(), trackeval.metrics.CLEAR({"THRESHOLD": threshold, "PRINT_CONFIG": False}),
+                      trackeval.metrics.Identity({"THRESHOLD": threshold, "PRINT_CONFIG": False})]
+    with contextlib.redirect_stdout(io.StringIO()):  # TrackEval prints a lot; keep the console clean
+        evaluator = trackeval.Evaluator(eval_config)
+        dataset = trackeval.datasets.MotChallenge2DBox(dataset_config)
+        results, messages = evaluator.evaluate([dataset], metric_objects)
+    res = results["MotChallenge2DBox"][pipeline][seq]["pedestrian"]
+    hota, clear, ident = res["HOTA"], res["CLEAR"], res["Identity"]
+
+    tracks = contracts.read_table(tracks_csv, "tracks")
+    gt = _gt_in_frames(gt_tracks, frames)
+    values = {"hota": float(np.mean(hota["HOTA"])), "deta": float(np.mean(hota["DetA"])),
+              "assa": float(np.mean(hota["AssA"])), "loca": float(np.mean(hota["LocA"])),
+              "idf1": float(ident["IDF1"]), "mota": float(clear["MOTA"]), "idsw": int(clear["IDSW"])}
+    counts = {"frames": len(frames), "gt_ids": int(gt["track_id"].nunique()),
+              "pred_ids": int(tracks["track_id"].nunique()), "gt": int(len(gt)), "pred": int(len(tracks)),
+              "tp": int(clear["CLR_TP"]), "fn": int(clear["CLR_FN"]), "fp": int(clear["CLR_FP"]),
+              "idtp": int(ident["IDTP"]), "idfn": int(ident["IDFN"]), "idfp": int(ident["IDFP"])}
+    params = {"similarity_threshold": threshold, "trackeval_metrics": ["HOTA", "CLEAR", "Identity"],
+              "hota_alphas": "0.05:0.05:0.95 (mean)", "sequence": seq}
+    inputs = {"prediction": _relative(tracks_csv), "ground_truth": ground_truth or f"soccertrack:{meta['match']}",
+              "trackeval_workspace": _relative(ws)}
+    return _document("E4", pipeline, meta["split"], meta["match"], meta["frameset"], params, counts, values,
+                     inputs, cfg)
 
 
 def pool_metrics(per_match: list[dict[str, Any]]) -> dict[str, Any]:

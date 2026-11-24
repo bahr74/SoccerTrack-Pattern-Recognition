@@ -126,16 +126,62 @@ def test_write_oracle_detections(gt, cfg, tmp_path):
     assert m["precision"] == m["recall"] == m["ap50"] == 1.0
 
 
-@pytest.mark.skip(reason="TODO(Member 3, M3): export_trackeval(tracks_gt.csv, tracks_pred.csv) reproduces tests/fixtures/trackeval_example byte for byte")
-def test_04(): ...
+def _same_text(a, b):
+    """Byte-for-byte comparison that ignores Windows CRLF checkouts (git core.autocrlf) of the committed files."""
+    return a.read_bytes().replace(b"\r\n", b"\n") == b.read_bytes().replace(b"\r\n", b"\n")
 
 
-@pytest.mark.skip(reason="TODO(Member 3, M3): GT evaluated against itself gives HOTA = IDF1 = MOTA = 1.0")
-def test_05(): ...
+TRACKEVAL_FILES = ("gt/999001__fixture3/gt/gt.txt", "gt/999001__fixture3/seqinfo.ini",
+                   "trackers/yolov8n_coco+bytetrack/data/999001__fixture3.txt")
 
 
-@pytest.mark.skip(reason="TODO(Member 3, M3): tracks_pred.csv gives MOTA 0.6667, IDF1 0.7500, IDSW 1")
-def test_06(): ...
+def test_04(fixtures_dir, gt, tmp_path):
+    ws = E.export_trackeval(gt, fixtures_dir / "tracks_pred.csv", "E4__fixture", workspace_root=tmp_path)
+    assert ws == tmp_path / "E4__fixture"
+    for rel in TRACKEVAL_FILES:
+        assert (ws / rel).read_bytes() == (ws / rel).read_bytes().replace(b"\r\n", b"\n")  # we write LF only
+        assert _same_text(ws / rel, fixtures_dir / "trackeval_example" / rel), rel
+    first = (ws / TRACKEVAL_FILES[0]).read_text(encoding="utf-8").splitlines()[0]
+    assert first == "1,1,100.00,150.00,20.00,45.00,1,1,1"      # frame 0 -> 1; GT flags -1 -> 1
+
+
+def _gt_as_tracker_output(gt, fixtures_dir, tmp_path):
+    """The GT itself, written as if a tracker had produced it (pipeline gt_oracle+iou_hungarian)."""
+    path = C.write_table(gt, tmp_path / "gt_tracks.csv", "tracks")
+    meta = dict(C.read_run_meta(fixtures_dir / "tracks_pred.csv"), method="gt_oracle", tracker="iou_hungarian")
+    C.write_run_meta(meta, path)
+    return path
+
+
+def test_05(fixtures_dir, gt, cfg, tmp_path):
+    pytest.importorskip("trackeval")
+    doc = E.evaluate_tracking(_gt_as_tracker_output(gt, fixtures_dir, tmp_path), gt, cfg,
+                              workspace_root=tmp_path / "te")
+    m = doc["metrics"]
+    assert m["hota"] == m["idf1"] == m["mota"] == m["deta"] == m["assa"] == 1.0 and m["idsw"] == 0
+    assert doc["run_id"] == "E4__gt_oracle+iou_hungarian__val__999001__fixture3"
+
+
+def test_06(fixtures_dir, gt, cfg, tmp_path):
+    pytest.importorskip("trackeval")
+    doc = E.evaluate_tracking(fixtures_dir / "tracks_pred.csv", gt, cfg, workspace_root=tmp_path,
+                              ground_truth="tests/fixtures/tracks_gt.csv")
+    C.validate_metrics(doc)
+    m, c = doc["metrics"], doc["counts"]
+    assert (m["mota"], m["idf1"], m["idsw"]) == (0.6667, 0.75, 1)
+    # Hand-computed in SHARED_CONTRACTS.md §15: FN 2, FP 0, IDSW 1 of 9 GT boxes; IDTP 6, IDFP 1, IDFN 3.
+    assert (c["fn"], c["fp"], c["idtp"], c["idfp"], c["idfn"]) == (2, 0, 6, 1, 3)
+    assert (c["gt_ids"], c["pred_ids"], c["gt"], c["pred"]) == (3, 4, 9, 7)
+    assert 0 < m["hota"] < 1 and m["hota"] == pytest.approx((m["deta"] * m["assa"]) ** 0.5, abs=0.02)
+
+
+def test_tracking_rejects_strided_framesets(fixtures_dir, gt, tmp_path):
+    path = C.write_table(C.read_table(fixtures_dir / "tracks_pred.csv", "tracks").query("frame != 1"),
+                         tmp_path / "t.csv", "tracks")
+    C.write_run_meta(dict(C.read_run_meta(fixtures_dir / "tracks_pred.csv"),
+                          frames={"start": 0, "stop": 3, "stride": 2}), path)
+    with pytest.raises(C.ContractError, match="stride 1"):
+        E.export_trackeval(gt, path, "x", workspace_root=tmp_path)
 
 
 @pytest.mark.skip(reason="TODO(Member 3, M4): pool_metrics recomputes P, R and F1 from summed counts")
