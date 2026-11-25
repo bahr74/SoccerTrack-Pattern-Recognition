@@ -17,15 +17,19 @@ class UploadTooLarge(ValueError):pass
 def validate_upload(name,length):
     if any(c in name for c in ('/','\\',':','\x00')) or Path(name).name!=name or Path(name).suffix.lower() not in ('.avi','.mp4','.mov','.mkv'):
         raise ValueError('Select an MP4, AVI, MOV or MKV video file')
-    if Path(name).stem in ('128057','132831'):raise PermissionError('Held-out test matches are prohibited')
+    if Path(name).stem in ('128057','132831','117092'):raise PermissionError('Protected/disabled matches are prohibited')
     if length>MAX_UPLOAD:raise UploadTooLarge('Video exceeds 512 MiB. Choose a smaller file or use Load Real Validation Demo, which reads the approved clip directly.')
     if length<=0:raise ValueError('The selected video is empty')
 
 
-def make_server(port=8765):
+def make_server(port=8765,final_run=None):
     import torch,scientific_workflow as w
     torch.set_num_threads(2);token=secrets.token_urlsafe(24);preview=Preview()
-    log_path=w.BASE/'corrections/runtime'/('operations_'+secrets.token_hex(8)+'.jsonl');log_path.parent.mkdir(parents=True,exist_ok=True);log_lock=threading.Lock()
+    final=None
+    if final_run:
+        from final_provider import FinalProvider
+        final=FinalProvider(final_run)
+    log_path=(Path(final_run)/'gui_logs' if final_run else ROOT/'outputs/phase2_gui_runtime'/secrets.token_hex(8))/('operations_'+secrets.token_hex(8)+'.jsonl');log_path.parent.mkdir(parents=True,exist_ok=True);log_lock=threading.Lock()
     def log(operation,status,**details):
         with log_lock:
             if log_path.exists() and log_path.stat().st_size>16*1024*1024:return
@@ -56,13 +60,21 @@ def make_server(port=8765):
         def do_GET(self):
             if not self.local():return self.reply(403,{'error':'Local host required','state':'Error'})
             p=urlparse(self.path);args=parse_qs(p.query)
-            if p.path=='/':return self.reply(200,(Path(__file__).parent/'web/index.html').read_text(encoding='utf-8').replace('__TOKEN__',token).encode(),'text/html; charset=utf-8')
-            if p.path in ('/app.js','/app.css'):
+            if p.path=='/':
+                html=(Path(__file__).parent/'web/index.html').read_text(encoding='utf-8').replace('__TOKEN__',token)
+                if final:html=html.replace('</body>','<script src="/final.js"></script></body>').replace('MEMBER 1 · PATTERN RECOGNITION','SOCCERTRACK · INTEGRATED PHASE 2')
+                return self.reply(200,html.encode(),'text/html; charset=utf-8')
+            if p.path in ('/app.js','/app.css','/final.js'):
                 path=Path(__file__).parent/'web'/p.path[1:];return self.reply(200,path.read_bytes(),'text/javascript; charset=utf-8' if path.suffix=='.js' else 'text/css; charset=utf-8')
             if p.path in ('/download','/artifact'):
                 if args.get('token',[''])[0]!=token:return self.reply(403,{'error':'Invalid token','state':'Error'})
                 folder=OUT if p.path=='/download' else w.BASE;path=(folder/args.get('file',[''])[0]).resolve()
                 if not path.is_relative_to(folder.resolve()) or not path.is_file():return self.reply(404,{'error':'Artifact not found','state':'Error'})
+                return self.reply(200,path.read_bytes(),mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+            if p.path=='/final-artifact' and final:
+                if args.get('token',[''])[0]!=token:return self.reply(403,{'error':'Invalid token'})
+                path=(final.run/args.get('file',[''])[0]).resolve()
+                if not path.is_relative_to(final.run) or not path.is_file():return self.reply(404,{'error':'Unknown final artifact'})
                 return self.reply(200,path.read_bytes(),mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
             self.reply(404,{'error':'Unknown endpoint','state':'Error'})
         def do_POST(self):
@@ -99,6 +111,8 @@ def make_server(port=8765):
                 status=413 if isinstance(error,UploadTooLarge) else 409 if isinstance(error,CancelledOperation) else 400
                 self.reject(status,error,0 if consumed else length)
         def perform(self,endpoint,data):
+            if endpoint=='/api/final/results' and final:return final.results
+            if endpoint=='/api/final/frame' and final:return final.frame(int(data['index']),data.get('detector','scratch_hog_svm'),data.get('view','detection'),float(data.get('threshold',.5)),int(data.get('width',1280)))
             source=data.get('source','synthetic');method=data.get('method','rules');operation=data.get('operation_id')
             if endpoint=='/api/dashboard':
                 import ui_support
@@ -127,23 +141,26 @@ def make_server(port=8765):
             if endpoint=='/api/browse':
                 if str(data['folder']).startswith(('\\\\','//')):raise PermissionError('Local folders only')
                 folder=Path(data['folder']).resolve()
-                if any(part in ('128057','132831') for part in folder.parts):raise PermissionError('Held-out folder')
+                if any(part in ('128057','132831','117092') for part in folder.parts):raise PermissionError('Protected folder')
                 files=[{'name':'..','path':str(folder.parent),'directory':True}]
                 for p in sorted(folder.iterdir(),key=lambda v:v.name.lower()):
-                    if p.stem in ('128057','132831'):continue
+                    if p.stem in ('128057','132831','117092'):continue
                     if p.is_dir() or p.suffix.lower() in ('.avi','.mp4','.mov','.mkv'):files.append({'name':p.name,'path':str(p),'directory':p.is_dir()})
                     if len(files)>=200:break
                 return {'files':files}
             raise ValueError('Unknown endpoint')
-    server=ThreadingHTTPServer(('127.0.0.1',port),Handler);server.preview=preview;server.demo_token=token;server.operation_log=log_path
+    server=ThreadingHTTPServer(('127.0.0.1',port),Handler);server.preview=preview;server.final_provider=final;server.demo_token=token;server.operation_log=log_path
     return server
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--port',type=int,default=8765);args=parser.parse_args();server=make_server(args.port)
-    print(f'Member 1 provisional GUI: http://127.0.0.1:{server.server_port}',flush=True)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--port',type=int,default=8765);parser.add_argument('--final-run',type=Path);args=parser.parse_args();server=make_server(args.port,args.final_run)
+    print(f'SoccerTrack {"integrated validation" if args.final_run else "live scratch preview"}: http://127.0.0.1:{server.server_port}',flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
-    finally:server.preview.close();server.server_close()
+    finally:
+        server.preview.close()
+        if server.final_provider:server.final_provider.close()
+        server.server_close()
 
 if __name__=='__main__':main()

@@ -158,6 +158,7 @@ def test_declared_source_count_cannot_shorten_full_gt(fixtures_dir,cfg):
     with pytest.raises(C.ContractError,match='truncates'): E.validate_protocol(meta,cfg,'detections',gt)
 
 def test_pooled_ap_rejects_mixed_thresholds(fixtures_dir,cfg,tmp_path):
+    cfg=deepcopy(cfg);cfg.pop('yolo',None);cfg.pop('scratch',None)
     gt=C.read_table(fixtures_dir/'tracks_gt.csv','tracks')
     a=fixtures_dir/'detections_sample.csv'
     b=C.write_table(C.read_table(a,'detections'),tmp_path/'b.csv','detections')

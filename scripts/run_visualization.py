@@ -31,7 +31,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--frameset", choices=("eval10", "win60s", "full", "smoke"), default="win60s")
     parser.add_argument("--pipeline", default=None, help="<detector>+<tracker>")
     parser.add_argument("--use-fixtures", action="store_true", help="render from tests/fixtures/ (no real data)")
+    parser.add_argument('--output-dir',type=Path,help='Fresh contained figure root (default outputs/figures)')
+    parser.add_argument('--left-pipeline',default=None)
+    parser.add_argument('--right-pipeline',default='yolov8n_coco+bytetrack')
     return parser
+
+def _figure_root(args):
+    root=(args.output_dir or _REPO/'outputs/figures').resolve()
+    if not root.is_relative_to(_REPO/'outputs'):raise ValueError('Figures must remain below repository outputs')
+    return root
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +76,7 @@ def _cmd_eda(args, cfg) -> None:
     if box_sample_path and box_sample_path.exists():
         box_sample = pd.read_csv(box_sample_path)
 
-    out_dir = _REPO / "outputs" / "figures" / "eda"
+    out_dir = _figure_root(args) / 'eda'
     produced = plot_eda(stats, box_sample, out_dir)
     print(f"[EDA] Wrote {len(produced)} figures to {out_dir}:")
     for p in produced:
@@ -99,10 +107,10 @@ def _cmd_overlays(args, cfg, sources) -> None:
             print(f"[overlays] Table not found (yet): {table_path}")
             continue
         table = contracts.read_table(table_path, kind)
-        num_frames = int(table["frame"].max()) + 1 if not table.empty else 0
-        frames = config.frameset_range(args.frameset, num_frames, cfg)
+        meta=contracts.read_run_meta(table_path)
+        f=meta['frames'];frames=range(f['start'],f['stop'],f['stride'])
 
-        out_dir = _REPO / "outputs" / "figures" / "overlays"
+        out_dir = _figure_root(args) / 'overlays'
         out_dir.mkdir(parents=True, exist_ok=True)
 
         # We need real frames from data_io.iter_frames; that depends on Member 1
@@ -122,8 +130,15 @@ def _cmd_compare_overlay(args, cfg, sources) -> None:
     from soccertrack import config, contracts
     from soccertrack.visualize import side_by_side
 
-    pipeline_a = "scratch_hog_svm+iou_hungarian"
-    pipeline_b = "yolov8n_coco+bytetrack"
+    pipeline_a = args.left_pipeline
+    if pipeline_a is None:
+        latest=_REPO/'outputs/phase2_final/latest.json'
+        if latest.exists():
+            accepted=json.loads((_REPO/json.loads(latest.read_text())['path']/'accepted_results.json').read_text())
+            pipeline_a=accepted['selected_scratch_detector']+'+iou_hungarian'
+        else:pipeline_a='scratch_hog_svm+iou_hungarian'
+    pipeline_b = args.right_pipeline
+    contracts.split_pipeline_id(pipeline_a);contracts.split_pipeline_id(pipeline_b)
 
     split_cfg = cfg.get("project", {}).get("split", {})
     match_ids = list(split_cfg.get(args.split, []))
@@ -135,8 +150,7 @@ def _cmd_compare_overlay(args, cfg, sources) -> None:
         path_b = _REPO / "outputs" / "tracks" / pipeline_b / args.split / f"{mid}__{args.frameset}.csv"
 
         if not path_a.exists() or not path_b.exists():
-            print(f"[compare-overlay] One or both track files missing for match {mid}; skipping.")
-            continue
+            raise FileNotFoundError(f'Comparison tracks missing for {mid}; specify accepted pipelines')
 
         table_a = contracts.read_table(path_a, "tracks")
         table_b = contracts.read_table(path_b, "tracks")
@@ -144,7 +158,7 @@ def _cmd_compare_overlay(args, cfg, sources) -> None:
         try:
             from soccertrack.data_io import iter_frames  # type: ignore
             mp = config.match_paths(mid, sources)
-            out_dir = _REPO / "outputs" / "figures" / "overlays"
+            out_dir = _figure_root(args) / 'overlays'
             out_dir.mkdir(parents=True, exist_ok=True)
             for frame_id, bgr in iter_frames(mp.clip, [0]):  # first frame as sample
                 img = side_by_side(bgr, table_a, table_b, frame_id,
@@ -169,7 +183,7 @@ def _cmd_stages(args, cfg) -> None:
         if not stage_dir.exists():
             print(f"[stages] Stage dir not found (yet): {stage_dir}")
             continue
-        out_dir = _REPO / "outputs" / "figures" / "overlays"
+        out_dir = _figure_root(args) / 'overlays'
         out_path = out_dir / f"{mid}_stage.png"
         plot_stage_figure(stage_dir, frame_id=0, out_path=out_path)
         print(f"[stages] Wrote stage figure: {out_path}")
@@ -190,12 +204,16 @@ def main() -> None:
     args = build_parser().parse_args()
 
     from soccertrack import config
+    from soccertrack import split
+    if args.split=='test': raise PermissionError('Held-out visualization prohibited')
 
     try:
         cfg = config.load_config()
     except FileNotFoundError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
+    if args.match is not None and split.split_of(args.match,cfg)!=args.split:
+        raise PermissionError('Match/split mismatch')
 
     # data_sources only needed for commands that decode real video
     sources: dict = {}
@@ -223,11 +241,6 @@ def main() -> None:
     else:
         print(f"[ERROR] Unknown command: {args.command}", file=sys.stderr)
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
-
 
 
 if __name__ == "__main__":

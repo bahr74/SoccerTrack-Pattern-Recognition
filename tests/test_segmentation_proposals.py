@@ -110,8 +110,14 @@ def test_05(fixtures_dir):
 
 
 @pytest.mark.data
-@pytest.mark.skip(reason="TODO(Member 1, M3): real data: proposal recall at IoU 0.5 on 117093 eval10 is reported (no threshold asserted)")
-def test_data_01(): ...
+def test_data_01():
+    from soccertrack import config,contracts,data_io
+    cfg=config.load_config();sources=config.load_data_sources()
+    table=contracts.read_table(config.artifact_path('proposals','scratch_hog_svm','val','117093','eval10'),'proposals')
+    gt=data_io.load_gt_tracks('117093',sources);gt=gt[gt.frame.isin(config.frameset_range('eval10',5976,cfg))]
+    recall=proposals.proposal_recall(table,gt,.5)
+    assert 0<=recall<=1 and len(gt)==598*22
+    print('Actual117093 eval10 proposal recall:',recall)
 
 
 @pytest.fixture

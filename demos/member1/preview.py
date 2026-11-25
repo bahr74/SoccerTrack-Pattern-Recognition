@@ -142,7 +142,7 @@ class Preview:
         self.path=candidate;self.info=info;self.total=total;self.gt=gt;self.activate(selection)
         try:self._original(0,{'decoded':0,'grabs':0,'ids':set()}) # verify real decode, not just headers
         except Exception:self.close();self.path=None;raise
-        return dict(info,preview_frames=total,background_window=window,name=candidate.name,provenance=self.provenance(),label='PROVISIONAL offline preview; official M0 unavailable')
+        return dict(info,preview_frames=total,background_window=window,name=candidate.name,ground_truth_available=bool(gt_path),provenance=self.provenance(),label='Historical/live scratch preview; official integrated results use accepted validation provider')
 
     def _model(self,source,method):
         if method in ('original','gt','pitch','foreground','proposals'):return None

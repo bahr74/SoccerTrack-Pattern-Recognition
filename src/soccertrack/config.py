@@ -72,6 +72,12 @@ def load_config() -> dict[str, Any]:
             )
         with config_path.open("r", encoding="utf-8") as fh:
             cfg[section] = yaml.safe_load(fh) or {}
+        if not isinstance(cfg[section], dict):
+            raise ValueError(f'{filename} must contain a mapping')
+    from soccertrack.split import assert_disjoint
+    assert_disjoint(cfg)
+    for name in cfg['evaluation']['framesets']:
+        frameset_range(name, 1, cfg)
     return cfg
 
 
@@ -105,7 +111,20 @@ def load_data_sources(path: Path | None = None) -> dict[str, Any]:
                 f"See {example} for the expected structure."
             )
 
-    return yaml.safe_load(raw_text) or {}
+    sources = yaml.safe_load(raw_text)
+    if not isinstance(sources,dict) or not isinstance(sources.get('matches'),dict) or not isinstance(sources.get('weights'),dict) or not isinstance(sources.get('read_only_roots'),list):
+        raise ValueError('Registry needs matches/weights mappings and read_only_roots list')
+    for mid, entry in sources['matches'].items():
+        if not isinstance(mid,str) or not mid.isascii() or not mid.isdigit() or not isinstance(entry,dict):
+            raise ValueError('Registry match IDs must be quoted ASCII digits')
+        for key in ('mot','clip'):
+            if not isinstance(entry.get(key),str) or not Path(entry[key]).is_absolute():
+                raise ValueError(f'{mid}.{key} must be an absolute path')
+        if entry.get('calibration_dir') is not None and (not isinstance(entry['calibration_dir'],str) or not Path(entry['calibration_dir']).is_absolute()):
+            raise ValueError('calibration_dir must be an absolute path or null')
+    for value in list(sources['weights'].values())+sources['read_only_roots']:
+        if not isinstance(value,str) or not Path(value).is_absolute(): raise ValueError('Registry roots/weights must be absolute paths')
+    return sources
 
 
 def match_paths(match_id: str, sources: dict[str, Any]) -> MatchPaths:
@@ -114,6 +133,11 @@ def match_paths(match_id: str, sources: dict[str, Any]) -> MatchPaths:
     Raises ``KeyError`` with a helpful message if the match is not listed in
     ``data_sources.yaml``.
     """
+    from soccertrack.split import split_of
+    # No protected path resolution during Phase2, even with a frozen flag elsewhere.
+    if match_id in ('128057','132831','117092'):
+        raise PermissionError('Protected/disabled match access is prohibited')
+    if not str(match_id).startswith('999'): split_of(match_id,load_config())
     matches = sources.get("matches", {})
     if match_id not in matches:
         available = ", ".join(str(k) for k in matches)
@@ -125,9 +149,9 @@ def match_paths(match_id: str, sources: dict[str, Any]) -> MatchPaths:
     cal = entry.get("calibration_dir")
     return MatchPaths(
         match_id=match_id,
-        mot=Path(entry["mot"]),
-        clip=Path(entry["clip"]),
-        calibration_dir=Path(cal) if cal else None,
+        mot=Path(entry["mot"]).resolve(),
+        clip=Path(entry["clip"]).resolve(),
+        calibration_dir=Path(cal).resolve() if cal else None,
     )
 
 
@@ -144,7 +168,10 @@ def weights_path(key: str, sources: dict[str, Any]) -> Path:
             f"Weights key '{key}' not found in configs/data_sources.yaml → weights.\n"
             f"Available keys: {available}"
         )
-    return Path(weights[key])
+    path=Path(weights[key])
+    if not path.is_absolute():raise ValueError('Weights registry paths must be absolute')
+    if not path.is_file():raise FileNotFoundError(path)
+    return path.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +192,13 @@ def frameset_range(name: str, num_frames: int, cfg: dict[str, Any]) -> range:
             f"Available: {', '.join(framesets)}"
         )
     fs = framesets[name]
+    if not isinstance(num_frames,int) or isinstance(num_frames,bool) or num_frames < 0:
+        raise ValueError('num_frames must be a nonnegative integer')
+    for key in ('start','stride'):
+        value=fs.get(key,0 if key=='start' else 1)
+        if not isinstance(value,int) or isinstance(value,bool) or value < (1 if key=='stride' else 0): raise ValueError('Invalid frameset range/stride')
+    if fs.get('stop') is not None and (not isinstance(fs['stop'],int) or isinstance(fs['stop'],bool) or fs['stop']<fs.get('start',0)):
+        raise ValueError('Invalid frameset stop')
     start = int(fs.get("start", 0))
     stop_raw = fs.get("stop", None)
     stop = num_frames if stop_raw is None else min(int(stop_raw), num_frames)
@@ -203,7 +237,19 @@ def artifact_path(
     ``configs/data_sources.yaml``.
     """
     root = repo_root()
+    from soccertrack import contracts
+    import re
+    for value in (kind,method,split,match_id,frameset):
+        if not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9_+.-]+',value) or value in ('.','..'):
+            raise ValueError('Invalid artifact path component')
+    if split not in contracts.SPLITS or kind not in ('detections','tracks','proposals','pitch','workload'):
+        raise ValueError('Unknown artifact kind/split')
+    if kind=='tracks': contracts.split_pipeline_id(method)
+    elif method not in contracts.DETECTOR_IDS: raise ValueError('Unknown detector')
+    if match_id in ('128057','132831','117092'): raise PermissionError('Protected match outputs prohibited')
     out_path = root / "outputs" / kind / method / split / f"{match_id}__{frameset}.csv"
+    if not out_path.resolve().is_relative_to((root/'outputs').resolve()): raise PermissionError('Output escapes repository')
+    if sources is None and (root/'configs'/DATA_SOURCES_FILE).exists(): sources=load_data_sources()
 
     # Enforce read-only-root guard when sources are provided
     if sources is not None:

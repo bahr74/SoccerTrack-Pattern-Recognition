@@ -89,15 +89,24 @@ def run_detection(detector_id,match_id,split,frameset,cfg,sources,frozen_test=Fa
         classifier=load_classifier(detector_id)
     # Shared provenance is required before any official artifact can be written.
     digest=config.config_sha256(); paths=config.match_paths(match_id,sources)
-    info=data_io.video_info(paths.clip); total=data_io.count_decoded_frames(paths.clip)
+    info=data_io.video_info(paths.clip)
+    publication=sc.get('publication',{})
+    bg_path=publication.get('backgrounds',{}).get(match_id)
+    total=info['frame_count_header'] if bg_path else data_io.count_decoded_frames(paths.clip)
     frames=config.frameset_range(frameset,total,cfg)
-    train=[]
-    for match in splitting.matches_for('train',cfg):
-        if match in sources['matches']: train.append(data_io.load_gt_tracks(match,sources))
-    if not train: raise ValueError('Training GT is required for the size model')
-    training=pd.concat(train,ignore_index=True); training.attrs['split']='train'
-    model=proposals.fit_size_model(training)
-    bg=segmentation.estimate_background(paths.clip,sc['sampling']['background_num_frames'],total,sc['segmentation']['work_scale'])
+    if publication.get('size_model'):
+        import json
+        model=proposals.SizeModel(**json.loads((config.repo_root()/publication['size_model']).read_text()))
+    else:
+        train=[]
+        for match in splitting.matches_for('train',cfg):
+            if match in sources['matches']: train.append(data_io.load_gt_tracks(match,sources))
+        if not train: raise ValueError('Training GT is required for the size model')
+        training=pd.concat(train,ignore_index=True); training.attrs['split']='train'
+        model=proposals.fit_size_model(training)
+    bg=cv2.imread(str(config.repo_root()/bg_path)) if bg_path else segmentation.estimate_background(paths.clip,sc['sampling']['background_num_frames'],total,sc['segmentation']['work_scale'])
+    if bg is None or bg.shape[:2] != (int(info['height']*sc['segmentation']['work_scale']),int(info['width']*sc['segmentation']['work_scale'])):
+        raise ValueError('Published background missing or incompatible')
     pitch=segmentation.pitch_mask(bg,sc,match_id,paths.calibration_dir)
     candidate_rows=[]; detected_rows=[]; processed=[]; start=time.perf_counter()
     for index,frame in data_io.iter_frames(paths.clip,frames):

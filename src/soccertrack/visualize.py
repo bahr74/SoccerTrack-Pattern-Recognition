@@ -358,6 +358,8 @@ def overlay_video(
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.exists(): raise FileExistsError(out_path)
+    if not 0 < scale <= 2: raise ValueError('Invalid video scale')
 
     if not frames:
         return out_path
@@ -369,28 +371,26 @@ def overlay_video(
         # Fallback: direct cv2 sequential read when Member 1's iter_frames is not yet ready
         frame_iter = _fallback_iter_frames(clip_path, frames)
 
-    writer = None
-    for frame_id, bgr in frame_iter:
-        # Draw all table overlays
-        canvas = bgr
-        for label, table in tables.items():
-            canvas = draw_boxes(canvas, table, frame_id)
-
-        # Scale
-        if scale != 1.0:
-            new_w = int(canvas.shape[1] * scale)
-            new_h = int(canvas.shape[0] * scale)
-            canvas = cv2.resize(canvas, (new_w, new_h), interpolation=cv2.INTER_AREA)
-
-        if writer is None:
-            h, w = canvas.shape[:2]
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(str(out_path), fourcc, 25.0, (w, h))
-
-        writer.write(canvas)
-
-    if writer is not None:
-        writer.release()
+    from soccertrack.data_io import video_info
+    writer = None; seen=[]
+    fps=video_info(clip_path)['fps']/frames.step
+    try:
+        for frame_id, bgr in frame_iter:
+            canvas = bgr
+            for label, table in tables.items():
+                canvas = draw_boxes(canvas, table, frame_id)
+            cv2.putText(canvas,f'{" | ".join(tables)} | frame {frame_id}',(15,28),cv2.FONT_HERSHEY_SIMPLEX,.6,(255,255,255),2)
+            if scale != 1.0:
+                canvas = cv2.resize(canvas,(int(canvas.shape[1]*scale),int(canvas.shape[0]*scale)),interpolation=cv2.INTER_AREA)
+            if writer is None:
+                h,w=canvas.shape[:2]
+                writer=cv2.VideoWriter(str(out_path),cv2.VideoWriter_fourcc(*'mp4v'),fps,(w,h))
+                if not writer.isOpened(): raise OSError('Video writer could not open')
+            writer.write(canvas);seen.append(frame_id)
+        if seen != list(frames): raise RuntimeError('Incomplete overlay decoding')
+    finally:
+        if writer is not None: writer.release()
+        frame_iter.close()
 
     return out_path
 

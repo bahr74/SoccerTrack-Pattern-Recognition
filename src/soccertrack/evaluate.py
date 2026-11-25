@@ -82,9 +82,7 @@ def validate_protocol(meta: dict, cfg: dict, kind: str, gt_tracks=None) -> None:
         raise contracts.ContractError('Unsupported detection matching/AP protocol')
     if ev['detection']['iou_thresholds'] != [.5,.3] or ev['detection']['ap_iou_range'] != [.5,.95,.05]:
         raise contracts.ContractError('Detection IoU thresholds must match the approved protocol')
-    fixture = meta.get('frameset') == 'fixture3' and str(meta.get('match', '')).startswith('999')
-    if not fixture and selected_hash is not None and meta['config_sha256'] != selected_hash:
-        raise contracts.ContractError('Source config hash differs from selected shared configuration')
+    fixture = (meta.get('frameset') == 'fixture3' and str(meta.get('match', '')).startswith('999')) or (kind=='patch_scores' and meta.get('device')=='synthetic')
     if not fixture:
         if 'project' not in cfg:
             raise contracts.ContractError('Project split configuration is required')
@@ -98,10 +96,13 @@ def validate_protocol(meta: dict, cfg: dict, kind: str, gt_tracks=None) -> None:
                 raise contracts.ContractError(str(exc)) from exc
             if actual_split != meta['split']:
                 raise PermissionError('Match/split mismatch')
+    if not fixture and selected_hash is not None and meta['config_sha256'] != selected_hash:
+        raise contracts.ContractError('Source config hash differs from selected shared configuration')
     threshold = meta.get('operating_threshold')
     if threshold is None:
         raise contracts.ContractError('An explicit reporting threshold is required')
     expected = cfg.get('yolo', {}).get('operating_threshold') if meta['method'].startswith('yolo') else cfg.get('scratch', {}).get('detector', {}).get('operating_threshold')
+    if meta['method'] in ('gt_oracle','gt_noisy'): expected=None
     if not fixture and kind != 'patch_scores' and meta['method'] not in ('gt_oracle','gt_noisy') and expected is None:
         raise contracts.ContractError('Publish the selected reporting threshold before official evaluation')
     if expected is not None and not math.isclose(threshold, expected, abs_tol=1e-12):
@@ -138,6 +139,8 @@ def validate_protocol(meta: dict, cfg: dict, kind: str, gt_tracks=None) -> None:
 def _protocol_params(meta, cfg):
     """Lineage retained in every metric document, including runtime measurement scope."""
     return {'source_config_sha256': meta['config_sha256'], 'frames': meta['frames'],
+            'model_sha256':meta.get('model_sha256',meta.get('weights_sha256')),
+            'tracker_settings':meta.get('tracker_settings'),
             'score_floor': meta['score_floor'], 'score_threshold': meta['operating_threshold'],
             'runtime_scope': meta.get('runtime_scope', 'unspecified; see source notes'),
             'source_notes': meta['notes'],

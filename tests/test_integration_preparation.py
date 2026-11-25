@@ -23,7 +23,9 @@ def arrays():
                 box=np.array([[0,0,2,2],[3,0,2,2]],np.float32),kind=np.array(['gt','random']),
                 meta_json=np.array([json.dumps(dict(schema_version='1.0',split='val'))]))
 
-def test_scratch_score_export_schema_roundtrip_and_no_overwrite(tmp_path):
+def test_scratch_score_export_schema_roundtrip_and_no_overwrite(tmp_path,monkeypatch):
+    from soccertrack import config
+    monkeypatch.setattr(config,'config_sha256',lambda:'b'*64)
     runner=scratch_runner(); a=arrays();cfg=E.load_evaluation_config()
     cfg['scratch']=yaml.safe_load((ROOT/'configs/scratch.yaml').read_text())
     class Model:
@@ -46,6 +48,8 @@ def test_valid_patch_npz_roundtrip(tmp_path):
 
 @pytest.fixture
 def cache(tmp_path,monkeypatch):
+    from soccertrack import config
+    monkeypatch.setattr(config,'config_sha256',lambda:'d'*64)
     monkeypatch.setattr(safety,'ROOT',tmp_path)
     run=tmp_path/'source';run.mkdir()
     cfg=E.load_evaluation_config();cfg['yolo']=yaml.safe_load((ROOT/'configs/yolo.yaml').read_text())

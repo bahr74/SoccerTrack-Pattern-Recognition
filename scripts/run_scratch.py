@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--detector", default="scratch_hog_svm",
                         help="scratch_mwb0 | scratch_hog_svm | scratch_cnn (track also accepts gt_oracle, gt_noisy)")
     parser.add_argument("--frozen-test", action="store_true", help="required for --split test")
+    parser.add_argument('--output',type=Path,help='Fresh outputs CSV for aggregate score export only')
     return parser
 
 
@@ -81,7 +82,8 @@ def main() -> None:
         model=classifiers.load_classifier(args.detector)
         import hashlib
         checkpoint=outputs/'models'/args.detector/('model.joblib' if args.detector=='scratch_hog_svm' else 'model.pt')
-        target=outputs/'scores'/args.detector/args.split/'patches.csv'
+        target=args.output.resolve() if args.output else outputs/'scores'/args.detector/args.split/'patches.csv'
+        if not target.resolve().is_relative_to(outputs.resolve()): raise ValueError('Score output must remain in outputs')
         export_patch_scores(arrays,model,args.detector,args.split,cfg,target,
                             hashlib.sha256(checkpoint.read_bytes()).hexdigest(),config.config_sha256(),args.frozen_test)
         if args.split=='test': split.log_test_access('Member 1',args.detector,[target.relative_to(root).as_posix()],{args.detector:hashlib.sha256(checkpoint.read_bytes()).hexdigest()})
@@ -109,6 +111,8 @@ def main() -> None:
             target=config.artifact_path('tracks',pipeline,args.split,match,args.frameset)
             contracts.write_table(tracks,target,'tracks')
             contracts.write_run_meta(dict(meta,kind='tracks',tracker='iou_hungarian',runtime_seconds=seconds,
+                                           runtime_scope='IoU/Hungarian association only; decode/model/write excluded',
+                                           source_detection_sha256=__import__('hashlib').sha256(source.read_bytes()).hexdigest(),
                                            config_sha256=config.config_sha256(),
                                            created_utc=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
                                            frames_per_second=len(frames)/max(seconds,1e-9)),target)

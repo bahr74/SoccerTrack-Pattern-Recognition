@@ -1,74 +1,101 @@
-# Approach A (from scratch) configuration. Owner: Member 1.
-# All values are starting points. Tune ONLY on the validation split (117093) and record each choice.
-
 sampling:
-  train_frame_stride: 10          # frames used to build training patches
-  background_num_frames: 60       # frames sampled across the clip for the median background
-
+  train_frame_stride: 10
+  background_num_frames: 60
 segmentation:
-  work_scale: 0.5                 # background subtraction runs at this scale; boxes are rescaled to full resolution
-  pitch_mask_method: hsv          # hsv | keypoints | manual
-  hsv_green_low: [35, 40, 40]     # TODO(Member 1): tune on validation background images
-  hsv_green_high: [85, 255, 255]
-  manual_polygons: {}             # match id -> [[x, y], ...] in full-resolution pixels (fallback)
+  work_scale: 0.5
+  pitch_mask_method: hsv
+  hsv_green_low:
+  - 35
+  - 40
+  - 40
+  hsv_green_high:
+  - 85
+  - 255
+  - 255
+  manual_polygons: {}
   blur_ksize: 5
-  diff_colorspace: lab            # lab | gray
-  diff_threshold: 25              # TODO(Member 1): tune on validation
+  diff_colorspace: lab
+  diff_threshold: 18
   median_ksize: 5
-  open_ksize: 3
-  close_ksize: 7
+  open_ksize: 1
+  close_ksize: 5
   vertical_dilate: 3
-
 proposals:
-  min_area_px: 60                 # full-resolution pixels
-  size_model: linear_height_vs_row   # h_expected(y) fitted on TRAIN ground truth only
-  size_tolerance: [0.5, 2.0]      # keep blobs whose height is within these factors of h_expected(y)
+  min_area_px: 40
+  size_model: linear_height_vs_row
+  size_tolerance:
+  - 0.35
+  - 2.0
   split_wide_blobs: true
   split_width_factor: 1.6
-
 patches:
   height: 64
   width: 32
-  context: 0.10
+  context: 0.1
   negatives_per_positive: 3
-  negative_mix: {random: 0.4, partial: 0.3, proposal: 0.3}
+  negative_mix:
+    random: 0.4
+    partial: 0.3
+    proposal: 0.3
   random_iou_max: 0.1
-  partial_iou_range: [0.1, 0.4]
-
+  partial_iou_range:
+  - 0.1
+  - 0.4
 hog:
-  cell: [8, 8]
-  block: [2, 2]
+  cell:
+  - 8
+  - 8
+  block:
+  - 2
+  - 2
   bins: 9
-  block_norm: L2-Hys              # 64x32 patch -> 7 x 3 blocks x 36 = 756 features
+  block_norm: L2-Hys
   add_color_hist: false
-  color_hist_bins: [8, 4, 4]      # HSV bins if add_color_hist is true
-
+  color_hist_bins:
+  - 8
+  - 4
+  - 4
 svm:
-  C_grid: [0.01, 0.1, 1.0, 10.0]  # chosen on validation
+  C_grid:
+  - 0.01
+  - 0.1
+  - 1.0
+  - 10.0
   class_weight: balanced
   max_iter: 5000
-  hard_negative_rounds: 0         # Phase 3 improvement
-
+  hard_negative_rounds: 0
 cnn:
-  channels: [16, 32, 64]
+  channels:
+  - 16
+  - 32
+  - 64
   dropout: 0.3
   epochs: 15
   batch_size: 256
   lr: 0.001
   weight_decay: 0.0001
-  early_stopping_patience: 3      # monitored on validation PR-AUC
-  augment: {hflip: true, brightness: 0.2, contrast: 0.2}
-  device: auto                    # auto | cpu | cuda
-
+  early_stopping_patience: 3
+  augment:
+    hflip: true
+    brightness: 0.2
+    contrast: 0.2
+  device: auto
 detector:
-  classifier: hog_svm             # rules (MWB-0) | hog_svm | cnn
+  classifier: hog_svm
   nms_iou: 0.5
-  operating_threshold: null       # set from validation results before the frozen test run
-  rules: {aspect_range: [1.2, 4.0], min_fill_ratio: 0.3}   # MWB-0 verifier
-
+  operating_threshold: 0.5
+  rules:
+    aspect_range:
+    - 1.2
+    - 4.0
+    min_fill_ratio: 0.3
 tracker_iou:
   iou_gate: 0.3
   n_init: 3
   max_age: 15
-  min_score: null                 # null -> use detector.operating_threshold
-  use_kalman: false               # Phase 3
+  min_score: null
+  use_kalman: false
+publication:
+  size_model: outputs/models/scratch_size_model.json
+  backgrounds:
+    '117093': outputs/backgrounds/117093.png

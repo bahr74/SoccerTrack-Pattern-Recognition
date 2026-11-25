@@ -18,7 +18,7 @@ from soccertrack import data_io,segmentation,proposals,patches,classifiers,detec
 
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'outputs/member1_demo'
-HELD_OUT={'128057','132831'}
+HELD_OUT={'128057','132831','117092'}
 
 
 def safe_video(path):

@@ -51,8 +51,11 @@ def _check_mot(mot_path: Path) -> dict:
                 )
                 continue
             try:
-                frame = int(float(parts[0]))
-            except ValueError:
+                from decimal import Decimal
+                number=Decimal(parts[0])
+                if not number.is_finite() or number != number.to_integral_value() or number < 0: raise ValueError
+                frame = int(number)
+            except (ValueError,ArithmeticError):
                 result["issues"].append(f"Line {lineno}: cannot parse frame index '{parts[0]}'")
                 continue
             frames_seen.add(frame)
@@ -85,6 +88,7 @@ def _check_video(clip_path: Path) -> dict:
         cap = cv2.VideoCapture(str(clip_path))
         if not cap.isOpened():
             result["issues"].append("cv2.VideoCapture could not open the file")
+            cap.release()
             return result
         result["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         result["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -126,7 +130,9 @@ def _decode_frames(clip_path: Path) -> int | None:
 def _resolve_matches_for_split(split: str, sources: dict, project_cfg: dict) -> list[str]:
     """Return the list of match IDs for the requested split."""
     if split == "all":
-        return list(sources.get("matches", {}).keys())
+        from soccertrack.split import matches_for
+        return matches_for('train',project_cfg)+matches_for('val',project_cfg)
+    if split=='test': raise PermissionError('Held-out data checks are prohibited in Phase2')
     split_cfg = project_cfg.get("split", {})
     ids: list[str] = list(split_cfg.get(split, []))
     if split == "train" and split_cfg.get("use_train_optional", False):
@@ -146,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.split=='test': raise PermissionError('Held-out data checks prohibited before registry resolution')
 
     # Import config from the src package
     repo_root = Path(__file__).resolve().parent.parent
@@ -193,13 +200,13 @@ def main() -> None:
         # MOT annotation
         mot_check = _check_mot(mp.mot)
         entry["mot"] = mot_check
-        if mot_check["issues"]:
+        if mot_check["issues"] or not mot_check['exists']:
             all_ok = False
 
         # Video header
         vid_check = _check_video(mp.clip)
         entry["clip"] = vid_check
-        if vid_check["issues"]:
+        if vid_check["issues"] or not vid_check['exists']:
             all_ok = False
 
         # SHA-256 (if manifest provided and not skipped)
@@ -219,7 +226,7 @@ def main() -> None:
             decoded = _decode_frames(mp.clip)
             entry["decoded_frames"] = decoded
             if decoded is not None and mot_check.get("frames_annotated") is not None:
-                expected_frames = mot_check["frames_annotated"]
+                expected_frames = mot_check['max_frame']+1
                 if decoded != expected_frames:
                     entry["frame_count_mismatch"] = {
                         "decoded": decoded,
@@ -252,6 +259,9 @@ def main() -> None:
     out_dir = repo_root / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "data_check.json"
+    if out_path.exists():
+        from datetime import datetime,timezone
+        out_path=out_dir/('data_check_'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'.json')
     with out_path.open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
 
@@ -261,19 +271,19 @@ def main() -> None:
     print(header)
     print("-" * len(header))
     for mid, entry in report["matches"].items():
-        mot_ok = "✓" if not entry.get("mot", {}).get("issues") else "✗"
-        clip_ok = "✓" if not entry.get("clip", {}).get("issues") else "✗"
+        mot_ok = "OK" if entry.get('mot',{}).get('exists') and not entry.get("mot", {}).get("issues") else "FAIL"
+        clip_ok = "OK" if entry.get('clip',{}).get('exists') and not entry.get("clip", {}).get("issues") else "FAIL"
         issues = "; ".join(entry.get("mot", {}).get("issues", []) + entry.get("clip", {}).get("issues", []))
         print(f"{mid:<{col_w}} {mot_ok:<8} {clip_ok:<8} {issues[:80]}")
 
     print()
     print(f"Weights:")
     for key, we in report["weights"].items():
-        ok = "✓" if we["exists"] else "✗ MISSING"
+        ok = "OK" if we["exists"] else "MISSING"
         print(f"  {key}: {ok}  ({we['path']})")
 
     print()
-    status = "ALL OK" if all_ok else "ISSUES FOUND — see outputs/data_check.json"
+    status = "ALL OK" if all_ok else "ISSUES FOUND - see saved data check report"
     print(f"Status: {status}")
     print(f"Report written to: {out_path}")
 

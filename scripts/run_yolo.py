@@ -21,6 +21,8 @@ def build_parser():
     parser.add_argument('--detector',default='yolov8n_coco')
     parser.add_argument('--max-frames',type=int,default=None)
     parser.add_argument('--frozen-test',action='store_true')
+    parser.add_argument('--tracker-settings',type=__import__('pathlib').Path,help='Explicit JSON tracker-only override; recorded in sidecar')
+    parser.add_argument('--output',type=__import__('pathlib').Path,help='Fresh contained track CSV destination')
     return parser
 
 def main():
@@ -31,6 +33,15 @@ def main():
     if args.max_frames is not None and args.max_frames<=0:
         raise SystemExit('--max-frames must be positive')
     cfg=config.load_config()
+    if args.output and args.command!='track':raise ValueError('--output is for tracking only')
+    if args.output and args.max_frames is not None:raise ValueError('Choose explicit output or debug max-frames, not both')
+    if args.tracker_settings:
+        if args.command!='track':raise ValueError('Tracker settings apply only to association')
+        path=args.tracker_settings.resolve()
+        if not path.is_relative_to(config.repo_root()/'outputs'):raise ValueError('Tracker override must be an outputs JSON artifact')
+        settings=__import__('json').loads(path.read_text(encoding='utf-8-sig'))
+        if not isinstance(settings,dict) or set(settings)!=set(cfg['yolo']['bytetrack']):raise ValueError('Expected complete registered ByteTrack settings')
+        cfg=deepcopy(cfg);cfg['yolo']['bytetrack']=settings
     sources=config.load_data_sources()
     config.set_seeds(cfg['project']['seed'])
     matches=[args.match] if args.match else matches_for(args.split,cfg)
@@ -69,10 +80,16 @@ def main():
         tracks=tracks[(tracks.w>1)&(tracks.h>1)].reset_index(drop=True)
         pipeline=contracts.pipeline_id(args.detector,'bytetrack')
         output=config.artifact_path('tracks',pipeline,args.split,match,args.frameset)
+        if args.output:
+            output=args.output.resolve()
+            if not output.is_relative_to(config.repo_root()/'outputs'):raise ValueError('Track output outside outputs')
+            output.parent.mkdir(parents=True,exist_ok=True)
         if args.max_frames is not None:
             output=config.repo_root()/'outputs/debug/tracks'/pipeline/args.split/f'{match}__{args.frameset}.csv'
             output.parent.mkdir(parents=True,exist_ok=True)
+        if output.exists() or contracts.meta_path(output).exists():raise FileExistsError('Use a fresh versioned track destination')
         updated=dict(meta,kind='tracks',tracker='bytetrack',frames={'start':frames.start,'stop':frames.stop,'stride':1},
+            tracker_settings=cfg['yolo']['bytetrack'],
             input_detection_runtime_seconds=meta.get('runtime_seconds'),
             input_detection_runtime_scope=meta.get('runtime_scope','source detection notes'),
             runtime_scope='ByteTrack association only; model/decode/write excluded',

@@ -2,7 +2,7 @@
 
 **Course:** SBES 426, Medical Pattern Recognition · **Dataset:** SoccerTrack v2 (release v1.2) · **Deadlines:** Phase 2 Wed 25 Nov 2026 · Phase 3 Sat 19 Dec 2026
 
-> **Status: skeleton only. Implementation has not started.** Every module in `src/soccertrack/` currently raises `NotImplementedError("TODO(Member n, Mk)")`. Most tests are skipped placeholders that describe acceptance criteria. A green `pytest` run therefore does **not** mean anything is implemented. A milestone is done only when its skipped tests have been replaced by real, passing tests (`pytest -rs` lists what is left).
+> **Status: integrated Phase 2 validation implemented and executed.** The accepted local package is `outputs/phase2_final/phase2_20261125_01/START_HERE.md`. Launch the single application with `.venv/Scripts/python.exe demos/phase2/launch.py`. The unified source notebook is `notebooks/phase2_baseline.ipynb`; the report source is `docs/phase2/report/phase2_report.md`. Existing checkpoints and YOLO cache are reused. Custom HOG reference verification remains environment-blocked; browser visual acceptance is manual. Phase 3 and the final presentation remain pending. Generated scientific outputs are intentionally ignored by Git; obtain the accepted package or reproduce explicitly with the existing approved data/models. See the package for exact tests, limitations and artifact hashes.
 
 ---
 
