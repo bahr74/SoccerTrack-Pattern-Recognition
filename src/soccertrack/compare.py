@@ -36,9 +36,14 @@ def collect_metrics(metrics_dir: Path) -> "pd.DataFrame":
         with open(path, encoding="utf-8") as f:
             doc = contracts.validate_metrics(json.load(f))
         base = {k: doc[k] for k in ("run_id", "eval_id", "task", "method", "split", "match", "frameset")}
+        base.update(protocol=json.dumps(doc['params'], sort_keys=True),
+                    config_sha256=doc['provenance'].get('config_sha256'),
+                    runtime_scope=doc['params'].get('runtime_scope', 'unspecified'),
+                    result_scope=doc['params'].get('result_scope', 'legacy_unclassified'))
         for metric, value in doc["metrics"].items():
             rows.append(dict(base, metric=metric, value=value))
-    columns = ["run_id", "eval_id", "task", "method", "split", "match", "frameset", "metric", "value"]
+    columns = ["run_id", "eval_id", "task", "method", "split", "match", "frameset", "protocol",
+               "config_sha256", "runtime_scope", "result_scope", "metric", "value"]
     return pd.DataFrame(rows, columns=columns)
 
 
@@ -50,7 +55,9 @@ def _wide(long_df: "pd.DataFrame", split: str, eval_ids: tuple[str, ...], metric
     if df.empty:
         return pd.DataFrame(columns=["eval_id", "approach", "method", "match", "frameset", *metrics.values()])
     # One row per run that actually exists (pivot, not pivot_table, which would add every combination).
-    wide = df.pivot(index=["eval_id", "method", "match", "frameset"], columns="metric", values="value").reset_index()
+    wide = df.pivot(index=["run_id", "eval_id", "method", "match", "frameset"], columns="metric", values="value").reset_index()
+    lineage = df[['run_id','protocol','config_sha256','runtime_scope','result_scope']].drop_duplicates()
+    wide = wide.merge(lineage, on='run_id', validate='one_to_one')
     wide.columns.name = None
     for key in metrics:
         if key not in wide:
@@ -58,7 +65,8 @@ def _wide(long_df: "pd.DataFrame", split: str, eval_ids: tuple[str, ...], metric
     wide.insert(1, "approach", wide["method"].map(approach_of))
     wide["_pooled"] = wide["match"] == "pooled"
     wide = wide.sort_values(["eval_id", "approach", "method", "_pooled", "match"]).drop(columns="_pooled")
-    out = wide[["eval_id", "approach", "method", "match", "frameset", *metrics]].rename(columns=metrics)
+    out = wide[["eval_id", "approach", "method", "match", "frameset", 'run_id', 'protocol',
+                'config_sha256', 'runtime_scope', 'result_scope', *metrics]].rename(columns=metrics)
     return out.reset_index(drop=True)
 
 
@@ -164,13 +172,15 @@ def plot_confusion_matrix(metrics: dict[str, Any], out_path: Path) -> Path:
 
 def plot_curves(metrics_list: list[dict[str, Any]], curve: str, out_path: Path) -> Path:
     """Overlay PR or ROC curves of several runs (curve = "pr" | "roc")."""
+    if len({comparison_group(d) for d in metrics_list}) > 1:
+        raise ValueError('Cannot overlay incompatible evaluation protocols/framesets')
     plt = _figure(out_path)
     fig, ax = plt.subplots(figsize=(4.6, 4))
     for doc in metrics_list:
         data = (doc.get("curves") or {}).get(curve)
         if not data:
             continue
-        label = f"{doc['method']} [{doc['match']}]"
+        label = f"{doc['method']} [{doc['split']}/{doc['match']}/{doc['frameset']}; {doc['eval_id']}]"
         if curve == "pr":
             score = doc["metrics"].get("ap50", doc["metrics"].get("pr_auc"))
             ax.step(data["recall"], data["precision"], where="post",
@@ -185,7 +195,8 @@ def plot_curves(metrics_list: list[dict[str, Any]], curve: str, out_path: Path) 
             ax.set_ylabel("true positive rate (sensitivity)")
     ax.set_xlim(0, 1.02)
     ax.set_ylim(0, 1.02)
-    ax.set_title(f"{curve.upper()} curves", fontsize=10)
+    definition = 'detection AP@0.5' if metrics_list and metrics_list[0]['eval_id'] == 'E3' else 'classification AP'
+    ax.set_title(f"{curve.upper()} curves ({definition})", fontsize=10)
     ax.legend(fontsize=7, loc="lower left" if curve == "pr" else "lower right")
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
@@ -247,10 +258,22 @@ def write_comparison(metrics_dir: Path, split: str, tables_dir: Path, figures_di
             written.append(plot_confusion_matrix(doc, Path(figures_dir) / f"confusion_{doc['run_id']}.png"))
     detection = [d for d in docs if d["eval_id"] == "E3"]
     classification = [d for d in docs if d["eval_id"] in ("E1", "E2")]
-    if detection:
-        written.append(plot_curves(detection, "pr", Path(figures_dir) / f"pr_detection_{split}.png"))
-        written.append(plot_recall_by_height(detection, Path(figures_dir) / f"recall_by_height_{split}.png"))
-    if classification:
-        written.append(plot_curves(classification, "roc", Path(figures_dir) / f"roc_classifiers_{split}.png"))
-        written.append(plot_curves(classification, "pr", Path(figures_dir) / f"pr_classifiers_{split}.png"))
+    from itertools import groupby
+    for selected, prefix in [(detection, 'detection'), (classification, 'classifiers')]:
+        for i, (key, group) in enumerate(groupby(sorted(selected, key=comparison_group), comparison_group)):
+            group = list(group)
+            suffix = '' if i == 0 else f'_{i}_{group[0]["eval_id"]}_{group[0]["frameset"]}'
+            for curve in (('pr',) if prefix == 'detection' else ('roc', 'pr')):
+                written.append(plot_curves(group, curve, Path(figures_dir)/f'{curve}_{prefix}_{split}{suffix}.png'))
+            if prefix == 'detection':
+                written.append(plot_recall_by_height(group, Path(figures_dir)/f'recall_by_height_{split}{suffix}.png'))
     return written
+
+
+def comparison_group(doc):
+    """Method-selected operating thresholds may differ; AP protocol/window/task may not."""
+    import json
+    p = doc['params']
+    protocol = {k: p.get(k) for k in ('iou_thresholds','ap_iou_range','matching','ap_interpolation',
+                                    'score_floor','frames','iou_positive','result_scope')}
+    return (doc['eval_id'], doc['split'], doc['frameset'], json.dumps(protocol, sort_keys=True))

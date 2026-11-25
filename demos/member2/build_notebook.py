@@ -11,6 +11,9 @@ import nbformat as nbf
 
 
 def build(run,execute=True):
+    from demos.member2.safety import require_absent
+    run=require_absent(run,['member2_yolo_pipeline_experiments_source.ipynb',
+        'member2_yolo_pipeline_experiments_executed.ipynb','member2_yolo_pipeline_experiments.html','notebook_execution.json'])
     run=Path(run).resolve()
     cells=[]
     def md(text): cells.append(nbf.v4.new_markdown_cell(text))
@@ -93,7 +96,7 @@ New tracks require `new_track_thresh`; later arrivals require confirmation befor
     md('''## 13. Detection and tracking evaluation
 Local detection diagnostics use score-ordered greedy one-to-one matching at IoU 0.5, checked against the shared hand-computed fixture. TP is a matched prediction; FP is unmatched; FN is unmatched GT. Precision = TP/(TP+FP), recall = TP/(TP+FN), F1 = 2TP/(2TP+FP+FN). Object detection has no well-defined background-box TN count, so specificity, accuracy and ROC-AUC are not reported here.
 
-Official Member 3 validators/evaluators and oracle/noisy-GT producers remain placeholders. AP/mAP/HOTA/IDF1/MOTA/official ID switches are **NOT RUN**. Track counts and lengths are local diagnostics, not substitute tracking metrics. Required full eval10 and win60s are recorded by exact coverage, including empty-prediction frames.''')
+Member3 validators/evaluators and oracle/noisy-GT producers are implemented. Official execution awaits Member4 integration and canonical cache migration/replay. AP/mAP/HOTA/IDF1/MOTA/official ID switches are **NOT RUN** for this local experiment. Track counts and lengths are diagnostics, not substitute tracking metrics. Full eval10/win60s coverage includes empty-prediction frames.''')
     code("display(pd.DataFrame(manifest['required_detection_results']))\nfor name,expected in [('eval10',598),('win60s',1500)]:\n    coverage=json.loads((RUN/f'required_validation/{name}/coverage.json').read_text())\n    assert coverage['decoded_frames']==expected\n    print(name,expected,'frames; coverage verified')\nprint('Official E3:',manifest['official_e3'])\nprint('Official E4:',manifest['official_e4'])")
     md('''## 14. Comparative results and runtime
 Compare candidates only on the identical development frames at the same threshold or clearly stated individual optimum. Report-frame results use the selected fixed threshold. This within-match separation reduces direct frame reuse but is not an unbiased final test.
@@ -114,6 +117,7 @@ To reproduce explicitly, from the repository root with the existing environment:
 
 ```powershell
 .venv/Scripts/python.exe demos/member2/scientific_workflow.py --output outputs/member2_scientific/runs/NEW_UNIQUE_RUN
+.venv/Scripts/python.exe demos/member2/runtime_probe.py outputs/member2_scientific/runs/NEW_UNIQUE_RUN
 .venv/Scripts/python.exe demos/member2/build_artifacts.py outputs/member2_scientific/runs/NEW_UNIQUE_RUN
 .venv/Scripts/python.exe demos/member2/build_notebook.py outputs/member2_scientific/runs/NEW_UNIQUE_RUN
 ```
@@ -121,11 +125,11 @@ To reproduce explicitly, from the repository root with the existing environment:
 No fresh directory is overwritten. Pipeline sources, input hashes, full configurations, seeds, frame IDs, device, versions, measured timings and artifact hashes accompany the run. See Member 2 README and scientific handoff for the exact shared interfaces still required.''')
     code("print('Verified run:',manifest['run_id'])\nprint('No training, downloads or held-out testing performed by notebook execution.')\nprint('Verdict: PARTIAL — SHARED DEPENDENCIES BLOCKED')")
     notebook=nbf.v4.new_notebook(cells=cells,metadata={'kernelspec':{'name':'member2','display_name':'Member 2 project venv','language':'python'},'language_info':{'name':'python','version':'3.12'}})
-    source=ROOT/'demos/member2/notebooks/member2_yolo_pipeline_experiments.ipynb'
+    source=run/'member2_yolo_pipeline_experiments_source.ipynb'
     source.parent.mkdir(parents=True,exist_ok=True)
     nbf.write(notebook,source)
     if execute:
-        task=ROOT/'outputs/member2_scientific/notebook_runtime'
+        task=run/'notebook_runtime'
         for key,folder in [('IPYTHONDIR','ipython'),('JUPYTER_CONFIG_DIR','config'),('JUPYTER_DATA_DIR','data'),('JUPYTER_RUNTIME_DIR','runtime'),('TEMP','temp'),('TMP','temp')]:
             target=task/folder
             target.mkdir(parents=True,exist_ok=True)

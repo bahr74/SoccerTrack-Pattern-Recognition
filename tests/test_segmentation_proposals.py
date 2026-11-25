@@ -102,8 +102,11 @@ def test_04():
     np.testing.assert_allclose(model.expected_height(bottom), heights)
 
 
-@pytest.mark.skip(reason="TODO(Member 1, M3): proposal_recall on tests/fixtures/proposals_sample.csv vs tracks_gt.csv matches a hand-computed value")
-def test_05(): ...
+def test_05(fixtures_dir):
+    p=pd.read_csv(fixtures_dir/'proposals_sample.csv')
+    gt=pd.read_csv(fixtures_dir/'tracks_gt.csv')
+    assert proposals.proposal_recall(p,gt,.5)==pytest.approx(4/9)
+    assert proposals.proposal_recall(p.iloc[:0],gt,.5)==0
 
 
 @pytest.mark.data

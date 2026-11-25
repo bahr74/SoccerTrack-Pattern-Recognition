@@ -15,8 +15,8 @@ sys.path.insert(0,str(ROOT))
 from demos.member2.audit import digest
 os.environ['YOLO_OFFLINE']='true'
 os.environ['YOLO_AUTOINSTALL']='false'
-os.environ['YOLO_CONFIG_DIR']=str(ROOT/'outputs/member2_scientific/ultralytics')
-os.environ['MPLCONFIGDIR']=str(ROOT/'outputs/member2_scientific/matplotlib')
+os.environ.setdefault('YOLO_CONFIG_DIR',str(ROOT/'outputs/member2_scientific/ultralytics'))
+os.environ.setdefault('MPLCONFIGDIR',str(ROOT/'outputs/member2_scientific/matplotlib'))
 import cv2
 import numpy as np
 import pandas as pd
@@ -127,10 +127,11 @@ def infer(detector,frames,out,save_stages=False):
 def run(output=None):
     if not WEIGHTS.is_file() or digest(WEIGHTS)!=EXPECTED or not CLIP.is_file() or not MOT.is_file():
         raise RuntimeError('approved local validation data/weights unavailable or hash mismatch')
-    out=Path(output) if output else ROOT/'outputs/member2_scientific/runs'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    from demos.member2.safety import output_directory
+    out=output_directory(output if output else ROOT/'outputs/member2_scientific/runs'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'),fresh=True)
     out.mkdir(parents=True,exist_ok=False)
     from demos.member2.environment import capture
-    capture(WEIGHTS,EXPECTED)
+    capture(WEIGHTS,EXPECTED,out)
     torch.manual_seed(42)
     np.random.seed(42)
     torch.backends.cudnn.benchmark=False

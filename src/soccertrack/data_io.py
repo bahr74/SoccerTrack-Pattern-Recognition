@@ -291,6 +291,10 @@ def compute_eda_stats(splits: dict[str, list[str]], sources: dict[str, Any]) -> 
 
 
 def _box_quantiles(values: "pd.Series") -> dict[str, float]:
-    """Linear-interpolated percentiles of cleaned full-frame box dimensions."""
+    """Linear empirical quantiles (rank (n-1)*q), over cleaned full-frame boxes.
+
+    The specification does not select a percentile estimator. Use pandas/NumPy's
+    linear default consistently for p05/median/p95; never round dimensions first.
+    """
     return {name: float(values.quantile(q, interpolation="linear"))
             for name, q in (("p05", 0.05), ("median", 0.5), ("p95", 0.95))}

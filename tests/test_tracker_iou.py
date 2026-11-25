@@ -42,8 +42,12 @@ def test_03():
     assert not tracker.tracks
     assert tracker.update(5,det(5)).empty
 
-@pytest.mark.skip(reason='Member 1 M8 integration: shared contracts.validate_tracks is still Member 3 M0 placeholder')
-def test_04(): ...
+def test_04(fixtures_dir,cfg,tmp_path):
+    detections=contracts.read_table(fixtures_dir/'tracks_gt.csv','tracks').drop(columns='track_id')
+    tracks=tracking.track_sequence(detections,range(3),cfg)
+    contracts.validate_tracks(tracks,(640,360))
+    path=contracts.write_table(tracks,tmp_path/'tracks.csv','tracks')
+    pd.testing.assert_frame_equal(contracts.read_table(path,'tracks'),tracks,check_dtype=False)
 
 def test_empty_frames_and_validation(cfg):
     empty=pd.DataFrame(columns=contracts.DETECTION_COLUMNS)

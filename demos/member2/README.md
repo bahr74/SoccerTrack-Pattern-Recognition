@@ -1,7 +1,8 @@
 ﻿# Member 2: tiled YOLOv8n + ByteTrack
 
 Local implementation and real validation are complete for the available boundaries.
-**Official E3/E4 integration remains blocked by Member 3/4 M0 placeholders.**
+**Official E3/E4 execution awaits Member4 infrastructure and final integration.**
+Member3 contracts/evaluators are implemented, with independent corrective tests.
 The authoritative evidence and completion matrix are in [SCIENTIFIC_HANDOFF.md](SCIENTIFIC_HANDOFF.md).
 
 Use the existing `.venv`, from the repository root. No package installation,
@@ -42,6 +43,19 @@ capture architecture/environment automatically. They can also be inspected separ
 `python demos/member2/environment.py`. The original executed run retains its original
 three-file source snapshot and recorded environment; subsequent reproduction helper
 improvements do not relabel or overwrite that historical evidence.
+
+Derivative builders now refuse existing outputs. Architecture/environment and
+notebook runtime are run-local; the notebook generator writes a fresh run-local
+source notebook and preserves the historical tracked notebook. Handoff generation
+writes run-local drafts and uses only that run's test logs. Commands above describe
+a future explicitly authorized reproduction, not permission to repeat inference.
+
+For cache reuse after Member4 integration, use `demos/member2/migrate_cache.py`:
+`verify_cache` checks the source model/config/code/data hashes and exact coverage;
+`migrate` requires the actual nonzero shared config hash and writes a fresh output
+tree through shared writers/readers; `replay` consumes those serialized detections.
+Keep .05-floor detections, even below the reporting threshold. Recompute E3/E4
+after migration; raw historical tracks are not official derivatives.
 
 ## Tests
 

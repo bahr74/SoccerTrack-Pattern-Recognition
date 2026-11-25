@@ -138,24 +138,37 @@ def _check_no_nan(df: "pd.DataFrame", kind: str) -> None:
 def _numeric(df: "pd.DataFrame", columns, kind: str) -> "pd.DataFrame":
     """Return the given columns as floats, failing with a clear message if one is not numeric."""
     import pandas as pd
+    import numpy as np
 
     out = {}
     for c in columns:
         values = pd.to_numeric(df[c], errors="coerce")
-        if values.isna().any():
-            _fail(kind, f"column '{c}' must be numeric")
+        if values.isna().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
+            _fail(kind, f"column '{c}' must be finite numeric values")
         out[c] = values.astype(float)
     return pd.DataFrame(out, index=df.index)
 
 
 def _check_integer_column(df: "pd.DataFrame", column: str, kind: str, minimum: int | None = None) -> None:
-    import numpy as np
+    for value in df[column]:
+        number = _exact_integer(value, kind, column)
+        if minimum is not None and number < minimum:
+            _fail(kind, f"column '{column}' must be >= {minimum}")
 
-    values = _numeric(df, [column], kind)[column].to_numpy()
-    if not np.all(np.equal(np.mod(values, 1), 0)):
-        _fail(kind, f"column '{column}' must contain integers")
-    if minimum is not None and len(values) and values.min() < minimum:
-        _fail(kind, f"column '{column}' must be >= {minimum} (found {values.min():g})")
+
+def _exact_integer(value, kind: str, column: str) -> int:
+    """Parse without a float64 intermediate, including the full signed int64 domain."""
+    from decimal import Decimal, InvalidOperation
+    import numbers
+    try:
+        if isinstance(value, (bool,)) or type(value).__name__ == 'bool':
+            raise ValueError
+        number = Decimal(int(value)) if isinstance(value, numbers.Integral) else Decimal(str(value))
+        if not number.is_finite() or number != number.to_integral_value() or not -(2**63) <= number < 2**63:
+            raise ValueError
+        return int(number)
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
+        _fail(kind, f"column '{column}' must contain exact int64 integers")
 
 
 def _check_boxes(df: "pd.DataFrame", kind: str, image_size: tuple[int, int] | None) -> None:
@@ -315,6 +328,8 @@ def validate_patch_set(arrays: dict[str, "np.ndarray"]) -> None:
         info = json.loads(str(meta_json[0]))
     except json.JSONDecodeError as exc:
         _fail(what, f"meta_json is not valid JSON ({exc})")
+    if not isinstance(info, dict):
+        _fail(what, 'meta_json must encode an object')
     if info.get("schema_version") != SCHEMA_VERSION:
         _fail(what, f"meta_json schema_version must be '{SCHEMA_VERSION}'")
 
@@ -346,6 +361,8 @@ def validate_run_meta(meta: dict[str, Any]) -> dict[str, Any]:
     import re
 
     what = "run_meta"
+    if not isinstance(meta, dict):
+        _fail(what, "must be an object")
     missing = [k for k in RUN_META_REQUIRED_KEYS if k not in meta]
     if missing:
         _fail(what, f"missing key(s) {missing}")
@@ -378,13 +395,15 @@ def validate_run_meta(meta: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(meta["frameset"], str) or not meta["frameset"]:
             _fail(what, "frameset must be a non-empty string")
     for key in ("image_width", "image_height"):
-        if per_clip and (not isinstance(meta[key], int) or isinstance(meta[key], bool) or meta[key] <= 0):
+        if (per_clip or meta[key] is not None) and (not isinstance(meta[key], int) or isinstance(meta[key], bool) or meta[key] <= 0):
             _fail(what, f"{key} must be a positive integer")
-    if per_clip and (not isinstance(meta["fps"], (int, float)) or meta["fps"] <= 0):
+    if meta['fps'] is not None and (not _is_number(meta['fps']) or meta['fps'] <= 0):
+        _fail(what, "fps must be a positive number")
+    if per_clip and meta['fps'] is None:
         _fail(what, "fps must be a positive number")
     for key in ("score_floor", "operating_threshold"):
         value = meta[key]
-        if value is not None and (not isinstance(value, (int, float)) or not 0 <= value <= 1):
+        if value is not None and (not _is_number(value) or not 0 <= value <= 1):
             _fail(what, f"{key} must be in [0, 1] or null")
     if not isinstance(meta["frozen_test"], bool):
         _fail(what, "frozen_test must be true or false")
@@ -394,9 +413,14 @@ def validate_run_meta(meta: dict[str, Any]) -> dict[str, Any]:
         _fail(what, "config_sha256 must be 64 lowercase hex characters")
     if not isinstance(meta["created_utc"], str) or not re.fullmatch(_ISO_UTC, meta["created_utc"]):
         _fail(what, "created_utc must be ISO-8601 UTC, e.g. 2026-11-21T14:03:00Z")
+    from datetime import datetime
+    try:
+        datetime.fromisoformat(meta['created_utc'].replace('Z', '+00:00'))
+    except ValueError:
+        _fail(what, "created_utc is not a valid UTC date")
     for key in ("runtime_seconds", "frames_per_second"):
         value = meta[key]
-        if value is not None and (not isinstance(value, (int, float)) or value < 0):
+        if value is not None and (not _is_number(value) or value < 0):
             _fail(what, f"{key} must be a non-negative number or null")
     for key in ("device", "notes"):
         if not isinstance(meta[key], str):
@@ -405,7 +429,8 @@ def validate_run_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    import math
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _check_metric_value(key: str, value: Any, where: str) -> None:
@@ -431,6 +456,8 @@ def validate_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     domains (BOUNDED_METRIC_KEYS in [0, 1]; MOTA_KEYS <= 1 and possibly negative; NONNEGATIVE_REAL_KEYS >= 0;
     INTEGER_METRIC_KEYS and counts non-negative integers; null allowed for undefined values)."""
     what = "metrics"
+    if not isinstance(metrics, dict):
+        _fail(what, "must be an object")
     missing = [k for k in METRICS_REQUIRED_KEYS if k not in metrics]
     if missing:
         _fail(what, f"missing key(s) {missing}")
@@ -468,11 +495,19 @@ def validate_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
     for key, value in metrics["counts"].items():
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             _fail(what, f"counts.{key} = {value!r} must be a non-negative integer")
+    for section in ('breakdown','curves'):
+        if metrics.get(section) is not None and not isinstance(metrics[section],dict):
+            _fail(what, f'{section} must be an object')
     for name, values in (metrics.get("breakdown") or {}).items():
+        if not isinstance(values,dict): _fail(what, f'breakdown.{name} must be an object')
         for label, value in (values or {}).items():
             if value is not None and (not _is_number(value) or not 0 <= value <= 1):
                 _fail(what, f"breakdown.{name}.{label} = {value!r} must be in [0, 1] or null")
     for name, curve in (metrics.get("curves") or {}).items():
+        if not isinstance(curve,dict) or not curve or any(not isinstance(v,list) for v in curve.values()):
+            _fail(what, f'curves.{name} must contain arrays')
+        if any(not _is_number(x) or not 0 <= x <= 1 for v in curve.values() for x in v):
+            _fail(what, f'curves.{name} must contain finite fractions')
         lengths = {len(v) for v in curve.values()}
         if len(lengths) != 1:
             _fail(what, f"curves.{name} arrays must have the same length")
@@ -543,16 +578,20 @@ def read_table(path: Path, kind: str) -> "pd.DataFrame":
 
     if kind not in TABLE_SCHEMAS:
         raise ContractError(f"unknown table kind '{kind}'")
-    path = Path(path)
-    header = pd.read_csv(path, nrows=0, encoding="utf-8")
-    _check_columns(header, kind)
-    df = pd.read_csv(path, dtype={c: ("str" if t == "str" else "float64") for c, t in _column_dtypes(kind).items()},
-                     encoding="utf-8", keep_default_na=False, na_values=[""])
-    _check_no_nan(df, kind)
-    for c, t in _column_dtypes(kind).items():
-        if t == "int64":
-            _check_integer_column(df, c, kind)
-            df[c] = df[c].astype("int64")
+    import csv
+    try:
+        with Path(path).open(encoding='utf-8-sig', newline='') as stream:
+            rows = list(csv.reader(stream, strict=True))
+        if not rows or rows[0] != list(TABLE_SCHEMAS[kind]):
+            _fail(kind, 'invalid or missing CSV header')
+        if any(len(row) != len(rows[0]) or any(v == '' for v in row) for row in rows[1:]):
+            _fail(kind, 'malformed/empty CSV fields')
+        df = pd.DataFrame(rows[1:], columns=rows[0])
+        for c, t in _column_dtypes(kind).items():
+            df[c] = (pd.Series([_exact_integer(v, kind, c) for v in df[c]], index=df.index, dtype='int64')
+                     if t == 'int64' else df[c].astype(t))
+    except (csv.Error, ValueError, OverflowError) as exc:
+        raise ContractError(f'{kind}: malformed CSV: {exc}') from exc
     return _validate_table(df, kind)
 
 
@@ -569,6 +608,8 @@ def write_table(df: "pd.DataFrame", path: Path, kind: str) -> Path:
     if kind not in TABLE_SCHEMAS:
         raise ContractError(f"unknown table kind '{kind}'")
     _check_columns(df, kind)
+    by, ascending = _SORT_KEYS[kind]
+    _validate_table(df.sort_values(by, ascending=ascending, kind='mergesort').reset_index(drop=True), kind)
     columns = TABLE_SCHEMAS[kind]
     out = df.copy()
     if not out.empty:
@@ -576,7 +617,7 @@ def write_table(df: "pd.DataFrame", path: Path, kind: str) -> Path:
         for c, t in _column_dtypes(kind).items():
             if t == "int64":
                 _check_integer_column(out, c, kind)
-                out[c] = out[c].astype("int64")
+                out[c] = [_exact_integer(v, kind, c) for v in out[c]]
             elif t == "float64":
                 out[c] = out[c].astype(float).round(_DECIMALS.get(c, _DEFAULT_DECIMALS))
             else:
@@ -606,8 +647,11 @@ def read_run_meta(table_path: Path) -> dict[str, Any]:
     path = meta_path(table_path)
     if not path.exists():
         raise ContractError(f"run_meta: sidecar {path.name} not found next to {Path(table_path).name}")
-    with open(path, encoding="utf-8") as f:
-        meta = json.load(f)
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            meta = json.load(f)
+    except (ValueError, TypeError) as exc:
+        raise ContractError(f'run_meta: malformed JSON in {path.name}') from exc
     return validate_run_meta(meta)
 
 

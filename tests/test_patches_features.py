@@ -38,9 +38,9 @@ def test_02(synthetic_frame,fixtures_dir,cfg):
 
 def test_03(tmp_path,cfg):
     with pytest.raises(PermissionError): patches.build_patch_set('test',{}, {},False)
-    # The official storage interface must propagate missing shared validation.
+    # Malformed arrays are rejected before any file is created.
     arrays={'X':np.zeros((1,64,32,3),np.uint8)}
-    with pytest.raises(NotImplementedError): patches.save_patch_set(arrays,tmp_path/'blocked.npz')
+    with pytest.raises(contracts.ContractError,match='missing'): patches.save_patch_set(arrays,tmp_path/'blocked.npz')
     assert not (tmp_path/'blocked.npz').exists()
 
 def test_04(synthetic_patches,cfg):

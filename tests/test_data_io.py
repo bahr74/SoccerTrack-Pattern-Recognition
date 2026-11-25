@@ -100,9 +100,7 @@ def test_05(eda_sources, fixtures_dir, validator):
         assert set(stats["matches"][match]) == set(fixture["matches"][match])
     assert stats["matches"]["999001"] == fixture["matches"]["999001"]
     dirty_expected = fixture["matches"]["999002"]
-    # The sample JSON's dirty p05=10 is illustrative. Linear interpolation over
-    # the actual 11 widths gives 14 (halfway between the minimum 10 and next 18).
-    dirty_expected["box_width_px"]["p05"] = 14.0
+    # Linear interpolation over11 widths puts p05 halfway between10 and18.
     assert stats["matches"]["999002"] == dirty_expected
     # Persist/reload a synthetic stats artifact; reject NaN/Infinity in JSON.
     path = sources["synthetic_output"] / "stats.json"

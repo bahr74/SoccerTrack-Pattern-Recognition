@@ -75,14 +75,17 @@ def main() -> None:
             (folder/'history.json').write_text(json.dumps(history,indent=2)+'\n',encoding='utf-8')
         return
     if args.command == 'score-patches':
+        if args.match is not None:
+            raise ValueError('score-patches exports the entire split, not a single match')
         arrays=_load_patches(args.split,cfg)
         model=classifiers.load_classifier(args.detector)
-        import pandas as pd
-        table=pd.DataFrame({'sample_id':range(len(arrays['y'])),'match':arrays['match'],'frame':arrays['frame'],
-                            'kind':arrays['kind'],'y_true':arrays['y'],'score':model.predict_proba(arrays['X'])})
-        # Metadata for aggregate patch sets has not been specified in the shared
-        # per-match run sidecar. Do not invent an official metadata convention.
-        raise NotImplementedError('Patch scores computed; aggregate patch-score metadata needs Member 3 clarification')
+        import hashlib
+        checkpoint=outputs/'models'/args.detector/('model.joblib' if args.detector=='scratch_hog_svm' else 'model.pt')
+        target=outputs/'scores'/args.detector/args.split/'patches.csv'
+        export_patch_scores(arrays,model,args.detector,args.split,cfg,target,
+                            hashlib.sha256(checkpoint.read_bytes()).hexdigest(),config.config_sha256(),args.frozen_test)
+        if args.split=='test': split.log_test_access('Member 1',args.detector,[target.relative_to(root).as_posix()],{args.detector:hashlib.sha256(checkpoint.read_bytes()).hexdigest()})
+        return
     sources=config.load_data_sources()
     if args.command == 'patches':
         arrays=patches.build_patch_set(args.split,cfg,sources,args.frozen_test)
@@ -129,6 +132,38 @@ def _load_patches(name, cfg):
     if meta['split']!=name or not set(arrays['match']).issubset(split.matches_for(name,cfg)):
         raise PermissionError('Patch-set split/provenance mismatch')
     return arrays
+
+
+def export_patch_scores(arrays, model, detector_id, split_name, cfg, target, model_sha256, config_sha256, frozen_test=False):
+    """Aggregate score export with the existing nullable sidecar; no fitting or path infrastructure."""
+    import pandas as pd
+    import re
+    split.require_test_access(split_name, frozen_test)
+    contracts.validate_patch_set(arrays)
+    if detector_id not in ('scratch_hog_svm','scratch_cnn'):
+        raise ValueError('Patch scoring requires a registered scratch classifier')
+    if not set(arrays['match']).issubset(split.matches_for(split_name,cfg)):
+        raise PermissionError('Patch-set split/provenance mismatch')
+    if not re.fullmatch('[0-9a-f]{64}',model_sha256): raise ValueError('Model SHA256 required')
+    target=Path(target)
+    if target.exists() or contracts.meta_path(target).exists(): raise FileExistsError(target)
+    start=time.perf_counter()
+    scores=model.predict_proba(arrays['X'])
+    table=pd.DataFrame(dict(sample_id=range(len(scores)),match=arrays['match'],frame=arrays['frame'],
+                            kind=arrays['kind'],y_true=arrays['y'],score=scores))
+    threshold=cfg['scratch']['detector'].get('operating_threshold')
+    if threshold is None: threshold=.5  # approved E1 classifier threshold, not a detector selection
+    meta=dict(schema_version=contracts.SCHEMA_VERSION,kind='patch_scores',method=detector_id,tracker=None,
+              split=split_name,match=None,frameset=None,frames=None,image_width=None,image_height=None,fps=None,
+              score_floor=None,operating_threshold=threshold,frozen_test=frozen_test,config_sha256=config_sha256,
+              git_commit=None,created_utc=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+              runtime_seconds=time.perf_counter()-start,frames_per_second=None,device='cached_model',
+              model_sha256=model_sha256,runtime_scope='patch scoring only; dataset load/write excluded',
+              notes='Aggregate patch scores; model_sha256='+model_sha256+'; nominal rows may include repeated proposal negatives; preserve source sampling disclosure')
+    contracts.validate_patch_scores(table); contracts.validate_run_meta(meta)
+    contracts.write_table(table,target,'patch_scores'); contracts.write_run_meta(meta,target)
+    contracts.read_table(target,'patch_scores'); contracts.read_run_meta(target)
+    return target
 
 
 if __name__ == "__main__":

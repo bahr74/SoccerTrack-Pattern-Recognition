@@ -136,14 +136,14 @@ The complete Member 2-only command overrides marker exclusions using `-o addopts
 | Documented notebook and reproducibility | COMPLETE locally | 16 scientific sections, 17 executed code cells, cached artifact verification, HTML and execution evidence |
 | Real visual evidence | COMPLETE locally | Original/GT/tiles/local/global/pre/post NMS, paired experiments, score curves, TP/FP/FN, trajectories/lengths, decoded 150-frame video |
 | Final shared team notebook/report/slides | BLOCKED | Member 4 integration; isolated notebook/report section supplied |
-| Official AP/mAP/HOTA/IDF1/MOTA/ID switches | BLOCKED | Member 3 shared production placeholders on current branch; remote branch deliberately not reviewed/merged |
+| Official AP/mAP/HOTA/IDF1/MOTA/ID switches | EXECUTION PENDING | Member3 merged/corrected; Member4 configuration and cache migration/replay/evaluation remain pending |
 | Fine-tuning, workload and fatigue | PHASE 3 ONLY / outside scope | No execution or physiological claims |
 
 ## Integration handoff
 
 Member 1: consume only existing `iter_frames`, `video_info`, `read_mot_raw`, `clean_mot_geometry`, `matches_for`, `split_of`, `require_test_access`, `log_test_access`; shared `load_gt_tracks` still depends on Members3/4. No scratch detector/classifier/tracker import is introduced.
 
-Member 3: implement existing frozen `contracts.validate_detections`, `validate_tracks`, `validate_run_meta`, `read_table`, `write_table`, `read_run_meta`, `write_run_meta`, `pipeline_id`, plus approved oracle/noisy and E3/E4 runners. Certify fixture matching/AP and GT-as-tracker identity sanity before official reporting. No competing production evaluator is introduced by local diagnostics.
+Member 3: merged contracts/evaluators and corrective synthetic tests are available. Canonical shared-writer cache migration, read-back, tracker replay and official E3/E4 execution await final Member4 integration. Preserve historical local metrics as local results.
 
 Member 4: implement existing `config` M0 (`repo_root`, config/data-source loading, path/weight/frameset resolution, artifact paths, normalized config hash, seeds), supply configured local registry and inspect overlays. Integrate supplied report/notebook only after shared validation. The current official detect CLI fails at `config.load_config()` with `TODO(Member 4,M0)`; the trace is saved separately.
 

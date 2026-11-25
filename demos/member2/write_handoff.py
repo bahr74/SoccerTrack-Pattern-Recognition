@@ -23,7 +23,8 @@ def read_log(path):
 
 
 def write(run):
-    run=Path(run).resolve()
+    from demos.member2.safety import require_absent
+    run=require_absent(run,['SCIENTIFIC_HANDOFF.md','COMPLETION_MATRIX.md','member_2_yolo.md'])
     m=json.loads((run/'manifest.json').read_text())
     rel=run.relative_to(ROOT).as_posix()
     grid=pd.read_csv(run/'reference_threshold_comparison.csv')
@@ -31,12 +32,12 @@ def write(run):
     tracking=pd.DataFrame(m['tracking_diagnostics'])
     probe=pd.read_csv(run/'warmed_runtime_probe.csv').groupby('configuration').processing_seconds.agg(['mean','median']).reset_index()
     probe['fps']=1/probe['mean']
-    tests={name:read_log(ROOT/f'outputs/member2_scientific/{name}').strip().splitlines()[-1]
+    tests={name:read_log(run/'test_logs'/name).strip().splitlines()[-1] if (run/'test_logs'/name).is_file() else 'NOT RECORDED FOR THIS RUN'
            for name in ['baseline_pytest.txt','member2_unit_tests.txt','member2_gpu_tests.txt','member2_data_tests.txt','member2_all_tests.txt','full_pytest_final.txt']}
     matrix='''| Requirement | Status | Evidence / boundary |
 | --- | --- | --- |
 | M1 tiling, coordinates, global NMS | COMPLETE | Synthetic full pixel coverage, alternate geometry, clipping, border duplicates, invalid/empty boxes |
-| M2 native-resolution real person inference | IMPLEMENTED — LOCAL VALIDATION ONLY | Verified local weights; frame 0 has 69 detections; GPU acceptance passed; independent overlay inspected; shared Member 4 review pending |
+| M2 native-resolution real person inference | IMPLEMENTED — LOCAL VALIDATION ONLY | Initial overlap64 frame0:69; selected overlap128:72. Official acceptance remains separate |
 | M3 full eval10 and win60s detection | IMPLEMENTED — LOCAL VALIDATION ONLY | Exact 598/1500 coverage, low score cache, runtime and configuration; official validators/writers/E3 blocked |
 | M4 ByteTrack adapter and continuous YOLO sequence | IMPLEMENTED — LOCAL VALIDATION ONLY | Installed API, synthetic motion/misses/reset/crossing/index tests; all 1500 frames; official oracle/noisy/E4 blocked |
 | M5 bounded detection/threshold/tracker experiments | PARTIAL | Four paired candidates and three tracker settings; selected detector config; tracker defaults retained pending official evaluation; pitch-on comparison blocked |
@@ -50,7 +51,7 @@ def write(run):
 | Documented notebook and reproducibility | COMPLETE locally | 16 scientific sections, 17 executed code cells, cached artifact verification, HTML and execution evidence |
 | Real visual evidence | COMPLETE locally | Original/GT/tiles/local/global/pre/post NMS, paired experiments, score curves, TP/FP/FN, trajectories/lengths, decoded 150-frame video |
 | Final shared team notebook/report/slides | BLOCKED | Member 4 integration; isolated notebook/report section supplied |
-| Official AP/mAP/HOTA/IDF1/MOTA/ID switches | BLOCKED | Member 3 shared production placeholders on current branch; remote branch deliberately not reviewed/merged |
+| Official AP/mAP/HOTA/IDF1/MOTA/ID switches | EXECUTION PENDING | Member3 implemented; Member4 integration plus canonical cache migration/replay/evaluation pending |
 | Fine-tuning, workload and fatigue | PHASE 3 ONLY / outside scope | No execution or physiological claims |'''
     body=f'''# Member 2 Phase 2 scientific report — 2026-11-25
 
@@ -150,7 +151,7 @@ The complete Member2-only command overrides marker exclusions using `-o addopts=
 
 Member1: consume only existing `iter_frames`, `video_info`, `read_mot_raw`, `clean_mot_geometry`, `matches_for`, `split_of`, `require_test_access`, `log_test_access`; shared `load_gt_tracks` still depends on Members3/4. No scratch detector/classifier/tracker import is introduced.
 
-Member3: implement existing frozen `contracts.validate_detections`, `validate_tracks`, `validate_run_meta`, `read_table`, `write_table`, `read_run_meta`, `write_run_meta`, `pipeline_id`, plus approved oracle/noisy and E3/E4 runners. Certify fixture matching/AP and GT-as-tracker identity sanity before official reporting. No competing production evaluator is introduced by local diagnostics.
+Member3: merged contracts/evaluators and independent corrective tests are available. Execute E3/E4 only after Member4 integration, serialize/read back cached detections, replay trackers and retain source hashes. Historical local diagnostics are not promoted to official metrics.
 
 Member4: implement existing `config` M0 (`repo_root`, config/data-source loading, path/weight/frameset resolution, artifact paths, normalized config hash, seeds), supply configured local registry and inspect overlays. Integrate supplied report/notebook only after shared validation. The current official detect CLI fails at `config.load_config()` with `TODO(Member4,M0)`; the trace is saved separately.
 
@@ -162,10 +163,10 @@ Phase3 opportunities: approved train-only tile fine-tuning, tiny-object/overlap 
 '''
     for word in ['Member','Phase','Python','Ultralytics','threshold','buffer','reports','all','to','of','at','is']:
         body=re.sub(r'\b'+word+r'(?=\d)',word+' ',body)
-    (ROOT/'docs/phase2/sections/member_2_yolo.md').write_text(body,encoding='utf-8',newline='\n')
-    (ROOT/'demos/member2/SCIENTIFIC_HANDOFF.md').write_text(body,encoding='utf-8',newline='\n')
-    (ROOT/'demos/member2/COMPLETION_MATRIX.md').write_text('# Member 2 requirement coverage\n\n'+matrix+'\n',encoding='utf-8',newline='\n')
-    print('Wrote Member 2 report, handoff, and completion matrix')
+    (run/'member_2_yolo.md').write_text(body,encoding='utf-8',newline='\n')
+    (run/'SCIENTIFIC_HANDOFF.md').write_text(body,encoding='utf-8',newline='\n')
+    (run/'COMPLETION_MATRIX.md').write_text('# Member 2 requirement coverage\n\n'+matrix+'\n',encoding='utf-8',newline='\n')
+    print('Wrote run-local Member2 narrative drafts; tracked/historical documents preserved')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()

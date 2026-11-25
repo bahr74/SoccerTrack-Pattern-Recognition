@@ -178,4 +178,4 @@ Our HOTA (image-space player tracking on 60-s windows) is never compared with GS
 - **Short tracking windows.** `win60s` underestimates long-term ID switches; full clips are evaluated in Phase 3.
 - **Single validation match.** Results on 117093 may not represent other camera geometries (e.g. 132831).
 - **Pooled AUCs.** Pooled E1/E2 ROC-AUC and PR-AUC are `null` because they need the raw scores of all matches; E1 is already computed on the whole split.
-- **HOTA pooling** across matches is the frame-weighted mean of per-match values, while MOTA and IDF1 are recomputed from summed counts (stated in `params.pooling` of each pooled JSON).
+- **Tracking pooling** uses TrackEval `combine_sequences` on unrounded HOTA/CLEAR/Identity statistics retained in `inputs.trackeval_statistics`. Legacy scalar-only results require reevaluation; averaged per-match HOTA is not an official combined HOTA.

@@ -15,7 +15,7 @@
       "split": "train", "image_width": 640, "image_height": 360, "fps": 25.0,
       "frames_annotated": 4, "frames_decoded": 4, "boxes": 11, "ids": 3,
       "boxes_per_frame": {"min": 2, "max": 3, "mean": 2.75},
-      "box_width_px": {"p05": 10.0, "median": 20.0, "p95": 20.0},
+      "box_width_px": {"p05": 14.0, "median": 20.0, "p95": 20.0},
       "box_height_px": {"p05": 40.0, "median": 45.0, "p95": 45.0},
       "track_length_frames": {"min": 3, "median": 4, "max": 4},
       "issues": {"degenerate_boxes": 1, "clipped_boxes": 1, "duplicate_rows": 1, "frames_not_expected": 1}

@@ -99,25 +99,29 @@ def run_detection(detector_id,match_id,split,frameset,cfg,sources,frozen_test=Fa
     model=proposals.fit_size_model(training)
     bg=segmentation.estimate_background(paths.clip,sc['sampling']['background_num_frames'],total,sc['segmentation']['work_scale'])
     pitch=segmentation.pitch_mask(bg,sc,match_id,paths.calibration_dir)
-    candidate_rows=[]; detected_rows=[]; start=time.perf_counter()
+    candidate_rows=[]; detected_rows=[]; processed=[]; start=time.perf_counter()
     for index,frame in data_io.iter_frames(paths.clip,frames):
         p,d,_=detect_frame(frame,index,bg,pitch,model,sc,classifier,cfg['evaluation']['score_floor'])
-        candidate_rows.append(p); detected_rows.append(d)
+        candidate_rows.append(p); detected_rows.append(d); processed.append(index)
+    if processed != list(frames): raise RuntimeError('Incomplete decoded coverage; no artifact published')
     seconds=time.perf_counter()-start
     det=pd.concat(detected_rows,ignore_index=True) if detected_rows else pd.DataFrame(columns=contracts.DETECTION_COLUMNS)
     prop=pd.concat(candidate_rows,ignore_index=True) if candidate_rows else pd.DataFrame(columns=contracts.PROPOSAL_COLUMNS)
     meta={'schema_version':contracts.SCHEMA_VERSION,'kind':'detections','method':detector_id,'tracker':None,
           'split':split,'match':match_id,'frameset':frameset,'frames':{'start':frames.start,'stop':frames.stop,'stride':frames.step},
+          'source_num_frames':total,'processed_frame_count':len(processed),
           'image_width':info['width'],'image_height':info['height'],'fps':info['fps'],'score_floor':cfg['evaluation']['score_floor'],
           'operating_threshold':sc['detector']['operating_threshold'],'frozen_test':frozen_test,'config_sha256':digest,
           'git_commit':None,'created_utc':datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
           'runtime_seconds':seconds,'frames_per_second':len(detected_rows)/max(seconds,1e-9),'device':'cpu',
-          'notes':'Member 1 provisional width/scoring extension; not an approved reference experiment'}
+          'runtime_scope':'sequential decode/proposal/scoring/NMS; background/setup/write excluded',
+          'notes':'Offline noncausal background; native coordinates; selected model/config publication required'}
     contracts.validate_detections(det,meta); contracts.validate_proposals(prop)
     contracts.validate_run_meta(meta)
     emitted=[]
     for kind,table in (('detections',det),('proposals',prop)):
         path=config.artifact_path(kind,detector_id,split,match_id,frameset)
+        if path.exists() or contracts.meta_path(path).exists(): raise FileExistsError(path)
         contracts.write_table(table,path,kind)
         contracts.write_run_meta(dict(meta,kind=kind),path)
         emitted.extend([path,path.with_suffix('.meta.json')])

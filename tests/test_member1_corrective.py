@@ -152,10 +152,11 @@ def test_real_api_export_matches_analyzer_and_saved_candidate(real_evidence,tmp_
         assert exported['export_frames_decoded']==30
     finally:server.shutdown();server.preview.close();server.server_close();worker.join(5)
 
-def test_percentile_discrepancy_is_explicit_not_silently_accepted(fixtures_dir):
+def test_percentile_linear_convention_matches_shared_fixture(fixtures_dir):
     from soccertrack import data_io
     fixture=json.loads((fixtures_dir/'eda_stats_sample.json').read_text())
     clean,_=data_io.clean_mot_geometry(data_io.read_mot_raw(fixtures_dir/'mot_raw_dirty.txt'),(640,360),3)
-    assert fixture['matches']['999002']['box_width_px']['p05']==10.0
+    assert len(clean)==11
+    assert fixture['matches']['999002']['box_width_px']['p05']==14.0
     assert data_io._box_quantiles(clean.w)['p05']==14.0
-    # Member 3 approval of the convention/fixture remains a separate acceptance gate.
+    # rank(11-1)*.05=.5: halfway between widths10 and18. No real result is rewritten.

@@ -72,7 +72,11 @@ def matches(args, cfg) -> list[str]:
     from soccertrack import split
 
     split.require_test_access(args.split, args.frozen_test)
-    return [args.match] if args.match else split.matches_for(args.split, cfg)
+    if args.match:
+        if split.split_of(args.match, cfg) != args.split:
+            raise PermissionError('Match/split mismatch')
+        return [args.match]
+    return split.matches_for(args.split, cfg)
 
 
 def ground_truth(match: str):
@@ -105,12 +109,13 @@ def log_test(args, method: str, docs: list[dict]) -> None:
 def cmd_oracle(args, cfg) -> None:
     from soccertrack import config, data_io
 
+    selected = matches(args, cfg)  # authorize before even resolving a registry
     sources = _needs("config.load_data_sources (Member 4, M0)", config.load_data_sources)
-    for match in matches(args, cfg):
+    for match in selected:
         gt = ground_truth(match)
         paths = _needs("config.match_paths (Member 4, M0)", config.match_paths, match, sources)
         info = data_io.video_info(paths.clip)
-        frames = frameset_range(args.frameset, int(gt["frame"].max()) + 1, cfg)
+        frames = frameset_range(args.frameset, info['frame_count_header'], cfg)
         written = E.write_oracle_detections(gt, args.split, match, args.frameset, frames,
                                             (info["width"], info["height"]), info["fps"], cfg,
                                             OUTPUTS, args.frozen_test)
@@ -190,6 +195,8 @@ def cmd_fixtures(args, cfg) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    from soccertrack import split
+    split.require_test_access(args.split, args.frozen_test)
     if args.command in ("patches", "proposals", "detection") and not args.detector:
         build_parser().error(f"{args.command} needs --detector")
     if args.command == "tracking" and not args.pipeline:
@@ -198,6 +205,12 @@ def main(argv: list[str] | None = None) -> int:
         print("'failures' is Phase 3 (failure analysis on train/val); not part of Phase 2.")
         return 2
     cfg = E.load_evaluation_config()
+    if args.command != 'fixtures':
+        matches(args, cfg)  # includes compare; no dispatch/path reads before authorization
+    if args.detector is not None and args.detector not in contracts.DETECTOR_IDS:
+        raise contracts.ContractError('Unknown detector ID')
+    if args.pipeline is not None:
+        contracts.split_pipeline_id(args.pipeline)
     print(f"[{args.command}] split={args.split} frameset={args.frameset}")
     try:
         globals()[f"cmd_{args.command}"](args, cfg)

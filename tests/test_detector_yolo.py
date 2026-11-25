@@ -31,7 +31,7 @@ def test_coverage(size):
     assert all(a+1280-b>=64 for a,b in zip(starts,starts[1:]))
 
 @pytest.mark.parametrize('args',[(0,10,5,5,1),(10,10,0,5,0),(10,10,5,5,5),(10,10,5,5,-1),(True,10,5,5,1),(10,10,5,5,.5)])
-def test_invalid_tiling(args):
+def test_invalid_tiling_basic_boundaries(args):
     with pytest.raises(ValueError): make_tiles(*args)
 
 def test_translation_roundtrip_and_no_mutation():

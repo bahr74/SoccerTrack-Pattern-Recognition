@@ -13,7 +13,8 @@ import matplotlib.pyplot as plt
 
 def refresh_hashes(run):
     """Hash stable evidence, excluding derivative notebooks that verify this index."""
-    run=Path(run)
+    from demos.member2.safety import require_absent
+    run=require_absent(run,['artifact_hashes.json'])
     excluded={'artifact_hashes.json','notebook_execution.json'}
     hashes={p.relative_to(run).as_posix():digest(p) for p in run.rglob('*')
             if p.is_file() and p.name not in excluded and p.suffix not in ('.ipynb','.html')}
@@ -22,8 +23,12 @@ def refresh_hashes(run):
 
 
 def build(run):
-    run=Path(run).resolve()
+    from demos.member2.safety import require_absent
+    run=require_absent(run,['figures','annotated_validation.mp4','reference_threshold_comparison.csv',
+                            'candidate_optima.csv','video_verification.json','artifact_hashes.json'])
     manifest=json.loads((run/'manifest.json').read_text())
+    if not all((run/name).is_file() for name in ('architecture.json','environment.json','warmed_runtime_probe.csv')):
+        raise RuntimeError('Run-local environment/architecture and runtime_probe are required before building derivatives')
     if 'required_detection_results' not in manifest:
         raise RuntimeError('required validation run is not complete')
     snapshot=run/'source_snapshot'
@@ -155,9 +160,8 @@ def build(run):
     write_json(run/'video_verification.json',{'decoded_frames':decoded,'fps':25,'source_frame_ids':list(range(150)),
         'native_size':[4096,1080],'export_size':[2048,540],'aspect_preserved':True,'status':STATUS,
         'tracks_source':'required_validation/tracks_starting.csv','detector':'yolov8n_coco','tracker':'bytetrack'})
-    for source,name in [(ROOT/'outputs/member2_scientific/architecture.json','architecture.json'),
-                        (ROOT/'outputs/member2_scientific/environment.json','environment.json')]:
-        (run/name).write_bytes(source.read_bytes())
+    if not all((run/name).is_file() for name in ('architecture.json','environment.json')):
+        raise RuntimeError('Run-local architecture/environment provenance is required')
     refresh_hashes(run)
     print('Built figures and verified 150-frame video:',run)
 

@@ -73,10 +73,13 @@ def main():
             output=config.repo_root()/'outputs/debug/tracks'/pipeline/args.split/f'{match}__{args.frameset}.csv'
             output.parent.mkdir(parents=True,exist_ok=True)
         updated=dict(meta,kind='tracks',tracker='bytetrack',frames={'start':frames.start,'stop':frames.stop,'stride':1},
+            input_detection_runtime_seconds=meta.get('runtime_seconds'),
+            input_detection_runtime_scope=meta.get('runtime_scope','source detection notes'),
+            runtime_scope='ByteTrack association only; model/decode/write excluded',
             runtime_seconds=elapsed,frames_per_second=len(frames)/elapsed if elapsed else 0,device='cpu',
             config_sha256=config.config_sha256(),created_utc=datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
             git_commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=config.repo_root(),text=True).strip(),
-            notes=meta['notes']+f'; input_config_sha256={meta["config_sha256"]}; input_table={input_path.relative_to(config.repo_root()).as_posix()}; ByteTrack association only; input low-score detections retained; model/decode/write excluded')
+            notes=f'ByteTrack association only; input low-score detections retained; model/decode/write excluded; input_config_sha256={meta["config_sha256"]}; input_table={input_path.relative_to(config.repo_root()).as_posix()}; source_detection_notes='+meta['notes'])
         contracts.validate_tracks(tracks,(meta['image_width'],meta['image_height']))
         contracts.validate_run_meta(updated)
         contracts.write_table(tracks,output,'tracks')

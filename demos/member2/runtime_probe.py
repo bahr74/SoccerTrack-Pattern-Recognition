@@ -9,7 +9,8 @@ sys.path.insert(0,str(ROOT))
 from demos.member2.scientific_workflow import *
 
 def probe(run):
-    run=Path(run)
+    from demos.member2.safety import require_absent
+    run=require_absent(run,['warmed_runtime_probe.csv','runtime_probe_definition.json'])
     manifest=json.loads((run/'manifest.json').read_text())
     if 'required_detection_results' not in manifest:
         raise RuntimeError('wait for full validation completion')
