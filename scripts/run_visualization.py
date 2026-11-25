@@ -77,8 +77,7 @@ def _cmd_eda(args, cfg) -> None:
 
 def _cmd_overlays(args, cfg, sources) -> None:
     """Draw bounding-box overlays for one pipeline on the requested match/frameset."""
-    import pandas as pd
-    from soccertrack import config
+    from soccertrack import config, contracts
     from soccertrack.visualize import draw_boxes
 
     if args.pipeline is None:
@@ -99,8 +98,8 @@ def _cmd_overlays(args, cfg, sources) -> None:
         if not table_path.exists():
             print(f"[overlays] Table not found (yet): {table_path}")
             continue
-        table = pd.read_csv(table_path)
-        num_frames = int(table["frame"].max()) + 1
+        table = contracts.read_table(table_path, kind)
+        num_frames = int(table["frame"].max()) + 1 if not table.empty else 0
         frames = config.frameset_range(args.frameset, num_frames, cfg)
 
         out_dir = _REPO / "outputs" / "figures" / "overlays"
@@ -120,8 +119,7 @@ def _cmd_overlays(args, cfg, sources) -> None:
 
 def _cmd_compare_overlay(args, cfg, sources) -> None:
     """Side-by-side (vertically stacked) overlay for Pipeline A vs Pipeline B."""
-    import pandas as pd
-    from soccertrack import config
+    from soccertrack import config, contracts
     from soccertrack.visualize import side_by_side
 
     pipeline_a = "scratch_hog_svm+iou_hungarian"
@@ -140,8 +138,8 @@ def _cmd_compare_overlay(args, cfg, sources) -> None:
             print(f"[compare-overlay] One or both track files missing for match {mid}; skipping.")
             continue
 
-        table_a = pd.read_csv(path_a)
-        table_b = pd.read_csv(path_b)
+        table_a = contracts.read_table(path_a, "tracks")
+        table_b = contracts.read_table(path_b, "tracks")
 
         try:
             from soccertrack.data_io import iter_frames  # type: ignore
